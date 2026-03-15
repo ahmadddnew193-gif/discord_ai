@@ -6,11 +6,12 @@ import csv
 import os
 from datetime import datetime
 import random
+import pandas as pd
 
-st.set_page_config(page_title="Discord AI Auditor", page_icon="🛡️", layout="wide")
-st.title("🛡️ Discord AI Bot: Personality & Memory System")
+st.set_page_config(page_title="Discord AI Suite", page_icon="🛡️", layout="wide")
+st.title("🛡️ Discord AI Bot & History Scraper")
 
-# --- Session State Initialization ---
+# --- Initialize Session State ---
 if "bot_running" not in st.session_state:
     st.session_state.bot_running = False
 if "tokens" not in st.session_state:
@@ -39,12 +40,11 @@ def validate_token(tk):
     return False, None
 
 def add_reaction(channel_id, message_id, emoji, headers):
-    # Emojis must be URL encoded (e.g., 🧠 is %F0%9F%A7%A0)
     encoded_emoji = requests.utils.quote(emoji)
     url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
     requests.put(url, headers=headers)
 
-# --- Sidebar Configuration ---
+# --- Sidebar ---
 with st.sidebar:
     st.header("🔑 Authentication")
     token = st.text_input("Discord Token", type="password")
@@ -60,102 +60,107 @@ with st.sidebar:
     else: my_username = None
 
     or_key = st.text_input("OpenRouter API Key", type="password")
-    channel_id = st.text_input("Channel ID")
+    channel_id_input = st.text_input("Channel ID")
+
+# --- Tabs ---
+tab1, tab2 = st.tabs(["🤖 Bot Control", "📂 History Scraper"])
+
+# --- TAB 1: BOT CONTROL ---
+with tab1:
+    col1, col2 = st.columns(2)
+    with col1:
+        system_prompt = st.text_area("System Prompt", value="You are a helpful assistant.")
+    with col2:
+        blacklist_input = st.text_area("Blacklisted Keywords", placeholder="spam, help")
+        owner_name = st.text_input("Owner Username").strip().lower()
+        allowed_input = st.text_input("Allowed Users", value="everyone")
+
+    allowed_users = "everyone" if allowed_input.lower().strip() == "everyone" else [u.strip().lower() for u in allowed_input.split(",") if u.strip()]
+    blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
+    client = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1") if or_key else None
+
+    c1, c2, c3 = st.columns([1,1,2])
+    with c1:
+        if st.button("▶️ Launch Bot", use_container_width=True, disabled=not (my_username and or_key)):
+            st.session_state.bot_running = True
+    with c2:
+        if st.button("🛑 Stop Bot", use_container_width=True):
+            st.session_state.bot_running = False
     
-    st.divider()
-    st.header("🧠 AI Settings")
-    system_prompt = st.text_area("System Prompt", value="You are a helpful assistant.")
-    memory_size = st.slider("Memory Depth", 1, 10, 5)
+    log_container = st.container(height=300)
 
-    st.divider()
-    st.header("🚫 Safety")
-    owner_name = st.text_input("Owner Username").strip().lower()
-    allowed_input = st.text_input("Allowed Users", value="everyone")
-    blacklist_input = st.text_area("Blacklisted Keywords")
+    if st.session_state.bot_running:
+        headers = {"Authorization": token, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+        discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
+        latest_message_id = None
+        
+        while st.session_state.bot_running:
+            try:
+                r = requests.get(discord_url, headers=headers)
+                if r.status_code == 200:
+                    msgs = r.json()
+                    if msgs and isinstance(msgs, list):
+                        latest = msgs[0]
+                        author, content, msg_id = latest['author']['username'].lower(), latest['content'].strip(), latest['id']
 
-# --- Logic Processing ---
-allowed_users = "everyone" if allowed_input.lower().strip() == "everyone" else [u.strip().lower() for u in allowed_input.split(",") if u.strip()]
-blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
-client = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1") if or_key else None
-
-# --- Main UI ---
-col1, col2, col3 = st.columns([1,1,2])
-with col1:
-    if st.button("▶️ Launch", use_container_width=True, disabled=not (my_username and or_key)):
-        st.session_state.bot_running = True
-with col2:
-    if st.button("🛑 Stop", use_container_width=True):
-        st.session_state.bot_running = False
-with col3:
-    if os.path.exists("discord_audit_log.csv"):
-        with open("discord_audit_log.csv", "rb") as file:
-            st.download_button("📥 Download Audit Log", data=file, file_name="discord_audit_log.csv", mime="text/csv")
-
-log_container = st.container(height=350)
-
-if st.session_state.bot_running:
-    headers = {"Authorization": token, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
-    discord_url = f"https://discord.com/api/v9/channels/{channel_id}/messages"
-    latest_message_id = None
-    
-    while st.session_state.bot_running:
-        try:
-            r = requests.get(discord_url, headers=headers)
-            if r.status_code == 200:
-                msgs = r.json()
-                if msgs and isinstance(msgs, list):
-                    latest = msgs[0]
-                    author, content, msg_id = latest['author']['username'].lower(), latest['content'].strip(), latest['id']
-
-                    if msg_id != latest_message_id and author != my_username:
-                        # OWNER COMMANDS
-                        if author == owner_name:
-                            if content.lower() == "shutdown":
+                        if msg_id != latest_message_id and author != my_username:
+                            if author == owner_name and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 Offline."}, headers=headers)
                                 st.session_state.bot_running = False
                                 st.rerun()
-                            elif content.lower() == "!clear":
-                                st.session_state.memory = {}
-                                add_reaction(channel_id, msg_id, "🧹", headers)
-                                latest_message_id = msg_id
-                                continue
 
-                        # SAFETY & RATE LIMITS
-                        contains_blacklisted = any(word in content.lower() for word in blacklist)
-                        is_allowed = (allowed_users == "everyone" or author in allowed_users)
-                        
-                        now = time.time()
-                        st.session_state.tokens = min(5, st.session_state.tokens + ((now - st.session_state.last_time) / 10))
-                        st.session_state.last_time = now
+                            is_allowed = (allowed_users == "everyone" or author in allowed_users)
+                            if is_allowed and not any(w in content.lower() for w in blacklist):
+                                add_reaction(channel_id_input, msg_id, "🧠", headers)
+                                time.sleep(random.uniform(2, 4))
+                                reply = client.chat.completions.create(
+                                    model="openrouter/free", 
+                                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": content}]
+                                ).choices[0].message.content
+                                requests.post(discord_url, json={"content": reply}, headers=headers)
+                                log_container.write(f"✅ Sent to {author}")
+                            latest_message_id = msg_id
+                time.sleep(4)
+            except: break
 
-                        if not contains_blacklisted and is_allowed and st.session_state.tokens >= 1:
-                            st.session_state.tokens -= 1
-                            log_container.info(f"🗨️ {author}: {content}")
-                            
-                            # 1. ADD "THINKING" REACTION
-                            add_reaction(channel_id, msg_id, "🧠", headers)
-                            
-                            if author not in st.session_state.memory: st.session_state.memory[author] = []
-                            st.session_state.memory[author].append({"role": "user", "content": content})
-                            st.session_state.memory[author] = st.session_state.memory[author][-(memory_size*2):]
-                            
-                            time.sleep(random.uniform(2.0, 4.0)) # Simulate typing
-                            
-                            response = client.chat.completions.create(
-                                model="openrouter/free", 
-                                messages=[{"role": "system", "content": system_prompt}] + st.session_state.memory[author]
-                            )
-                            reply = response.choices[0].message.content
-                            
-                            st.session_state.memory[author].append({"role": "assistant", "content": reply})
-                            requests.post(discord_url, json={"content": reply}, headers=headers)
-                            log_to_csv(author, content, "RESPONDED")
-                        else:
-                            log_to_csv(author, content, "IGNORED")
-
-                        latest_message_id = msg_id
-            
-            time.sleep(4)
-        except Exception as e:
-            st.error(f"Loop Error: {e}")
-            break
+# --- TAB 2: HISTORY SCRAPER ---
+with tab2:
+    st.header("📥 Channel History Downloader")
+    st.write("This tool fetches the last 100 messages from the provided Channel ID.")
+    
+    limit = st.number_input("Number of messages to fetch", min_value=1, max_value=100, value=50)
+    
+    if st.button("🔍 Fetch History"):
+        if not token or not channel_id_input:
+            st.error("Missing Token or Channel ID!")
+        else:
+            with st.spinner("Accessing Discord archives..."):
+                headers = {"Authorization": token, "Content-Type": "application/json"}
+                scrape_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}"
+                
+                res = requests.get(scrape_url, headers=headers)
+                
+                if res.status_code == 200:
+                    data = res.json()
+                    history_list = []
+                    
+                    for m in data:
+                        history_list.append({
+                            "Timestamp": m['timestamp'],
+                            "Author": m['author']['username'],
+                            "Content": m['content']
+                        })
+                    
+                    df = pd.DataFrame(history_list)
+                    st.dataframe(df, use_container_width=True)
+                    
+                    csv_data = df.to_csv(index=False).encode('utf-8')
+                    st.download_button(
+                        label="📥 Download History as CSV",
+                        data=csv_data,
+                        file_name=f"discord_history_{channel_id_input}.csv",
+                        mime="text/csv"
+                    )
+                else:
+                    st.error(f"Error fetching history: {res.status_code}")
+                    
