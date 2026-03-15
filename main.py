@@ -8,9 +8,9 @@ from datetime import datetime
 import random
 
 st.set_page_config(page_title="Discord AI Auditor", page_icon="🛡️", layout="wide")
-st.title("🛡️ Discord AI Bot: Memory Control & Audit System")
+st.title("🛡️ Discord AI Bot: Personality & Memory System")
 
-# --- Initialize Session State ---
+# --- Session State Initialization ---
 if "bot_running" not in st.session_state:
     st.session_state.bot_running = False
 if "tokens" not in st.session_state:
@@ -18,8 +18,9 @@ if "tokens" not in st.session_state:
 if "last_time" not in st.session_state:
     st.session_state.last_time = time.time()
 if "memory" not in st.session_state:
-    st.session_state.memory = {} 
+    st.session_state.memory = {}
 
+# --- Helper Functions ---
 def log_to_csv(author, content, action):
     file_exists = os.path.isfile('discord_audit_log.csv')
     with open('discord_audit_log.csv', mode='a', newline='', encoding='utf-8') as f:
@@ -37,6 +38,13 @@ def validate_token(tk):
     except: pass
     return False, None
 
+def add_reaction(channel_id, message_id, emoji, headers):
+    # Emojis must be URL encoded (e.g., 🧠 is %F0%9F%A7%A0)
+    encoded_emoji = requests.utils.quote(emoji)
+    url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
+    requests.put(url, headers=headers)
+
+# --- Sidebar Configuration ---
 with st.sidebar:
     st.header("🔑 Authentication")
     token = st.text_input("Discord Token", type="password")
@@ -57,16 +65,7 @@ with st.sidebar:
     st.divider()
     st.header("🧠 AI Settings")
     system_prompt = st.text_area("System Prompt", value="You are a helpful assistant.")
-    memory_size = st.slider("Memory Depth (Messages)", 1, 10, 5)
-    
-    # --- MEMORY MONITOR ---
-    if st.session_state.memory:
-        active_users = len(st.session_state.memory)
-        total_msgs = sum(len(m) for m in st.session_state.memory.values())
-        st.info(f"🧠 Memory: {active_users} Users | {total_msgs} Events")
-        if st.button("🧹 Clear All Memory Now"):
-            st.session_state.memory = {}
-            st.success("Memory Wiped.")
+    memory_size = st.slider("Memory Depth", 1, 10, 5)
 
     st.divider()
     st.header("🚫 Safety")
@@ -74,12 +73,12 @@ with st.sidebar:
     allowed_input = st.text_input("Allowed Users", value="everyone")
     blacklist_input = st.text_area("Blacklisted Keywords")
 
-# Settings processing
+# --- Logic Processing ---
 allowed_users = "everyone" if allowed_input.lower().strip() == "everyone" else [u.strip().lower() for u in allowed_input.split(",") if u.strip()]
 blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
 client = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1") if or_key else None
 
-# UI Controls
+# --- Main UI ---
 col1, col2, col3 = st.columns([1,1,2])
 with col1:
     if st.button("▶️ Launch", use_container_width=True, disabled=not (my_username and or_key)):
@@ -109,20 +108,19 @@ if st.session_state.bot_running:
                     author, content, msg_id = latest['author']['username'].lower(), latest['content'].strip(), latest['id']
 
                     if msg_id != latest_message_id and author != my_username:
-                        # 1. OWNER SPECIAL COMMANDS
+                        # OWNER COMMANDS
                         if author == owner_name:
                             if content.lower() == "shutdown":
-                                requests.post(discord_url, json={"content": "🛑 Shutting down."}, headers=headers)
+                                requests.post(discord_url, json={"content": "🛑 Offline."}, headers=headers)
                                 st.session_state.bot_running = False
                                 st.rerun()
                             elif content.lower() == "!clear":
                                 st.session_state.memory = {}
-                                requests.post(discord_url, json={"content": "🧹 Memory cleared for all users."}, headers=headers)
-                                log_to_csv(author, content, "MEMORY RESET")
+                                add_reaction(channel_id, msg_id, "🧹", headers)
                                 latest_message_id = msg_id
                                 continue
 
-                        # 2. SAFETY CHECKS
+                        # SAFETY & RATE LIMITS
                         contains_blacklisted = any(word in content.lower() for word in blacklist)
                         is_allowed = (allowed_users == "everyone" or author in allowed_users)
                         
@@ -134,20 +132,19 @@ if st.session_state.bot_running:
                             st.session_state.tokens -= 1
                             log_container.info(f"🗨️ {author}: {content}")
                             
-                            # Update Conversation Memory
-                            if author not in st.session_state.memory:
-                                st.session_state.memory[author] = []
+                            # 1. ADD "THINKING" REACTION
+                            add_reaction(channel_id, msg_id, "🧠", headers)
+                            
+                            if author not in st.session_state.memory: st.session_state.memory[author] = []
                             st.session_state.memory[author].append({"role": "user", "content": content})
-                            
-                            # Apply Memory Depth
                             st.session_state.memory[author] = st.session_state.memory[author][-(memory_size*2):]
-                            
-                            messages_payload = [{"role": "system", "content": system_prompt}] + st.session_state.memory[author]
                             
                             time.sleep(random.uniform(2.0, 4.0)) # Simulate typing
                             
-                            # AI Request
-                            response = client.chat.completions.create(model="openrouter/free", messages=messages_payload)
+                            response = client.chat.completions.create(
+                                model="openrouter/free", 
+                                messages=[{"role": "system", "content": system_prompt}] + st.session_state.memory[author]
+                            )
                             reply = response.choices[0].message.content
                             
                             st.session_state.memory[author].append({"role": "assistant", "content": reply})
