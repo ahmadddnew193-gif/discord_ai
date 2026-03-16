@@ -64,7 +64,7 @@ with st.sidebar:
     channel_id_input = st.text_input("Channel ID")
 
 # --- Tabs ---
-tab1, tab2 = st.tabs(["🤖 Bot Control", "📂 History Scraper"])
+tab1, tab2, tab3 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "👻 Ghost Writer"])
 
 # --- TAB 1: BOT CONTROL ---
 with tab1:
@@ -164,4 +164,43 @@ with tab2:
                     )
                 else:
                     st.error(f"Error fetching history: {res.status_code}")
-                    
+
+# --- TAB 3: GHOST WRITER ---
+with tab3:
+    st.header("👻 Ghost Writer: Anonymous Suggestion Box")
+    st.info("Direct Message the bot to have your message posted anonymously in the target channel.")
+    
+    if st.button("🔄 Poll for Secret Messages"):
+        headers = {"Authorization": token, "Content-Type": "application/json"}
+        # Fetch Direct Messages (DMs)
+        dm_url = "https://discord.com/api/v9/users/@me/channels"
+        dm_channels = requests.get(dm_url, headers=headers).json()
+        
+        for dm in dm_channels:
+            if dm['type'] == 1: # Private DM
+                msgs = requests.get(f"https://discord.com/api/v9/channels/{dm['id']}/messages?limit=1", headers=headers).json()
+                if msgs:
+                    msg = msgs[0]
+                    # Don't process our own messages or already processed ones
+                    if msg['author']['username'].lower() != my_username:
+                        content = msg['content']
+                        
+                        # AI Moderation Check
+                        mod_check = client.chat.completions.create(
+                            model="openrouter/free",
+                            messages=[{"role": "system", "content": "Check if this message is toxic or doxxing. Reply PASS or FAIL."}, {"role": "user", "content": content}]
+                        ).choices[0].message.content
+                        
+                        if "PASS" in mod_check.upper():
+                            # Post to public channel anonymously
+                            payload = {
+                                "embeds": [{
+                                    "title": "👻 Anonymous Message",
+                                    "description": content,
+                                    "color": 3447003
+                                }]
+                            }
+                            requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", json=payload, headers=headers)
+                            st.success(f"Posted secret from {msg['author']['username']}")
+                        else:
+                            st.warning("A message failed AI moderation and was blocked.")
