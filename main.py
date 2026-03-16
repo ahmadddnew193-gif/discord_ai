@@ -86,7 +86,7 @@ with st.sidebar:
     auto_restart = st.toggle("Auto-Restart (10min Idle)", value=True)
 
 # --- Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🎭 Chameleon", "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "🎮 Quest Spoofer", "🛠️ Active Dev Trigger"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🎭 Chameleon", "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "🌈 Profile Glitcher"])
 
 # --- TAB 1: BOT CONTROL ---
 with tab1:
@@ -292,30 +292,24 @@ with tab7:
             r = requests.post("https://discord.com/api/v9/hypesquad/online", headers=h, json={"house_id": house_map[house]})
             if r.status_code == 204: st.success(f"Now a member of {house}!")
 
-# --- TAB 8: QUEST SPOOFER ---
+# --- TAB 8: PROFILE GLITCHER ---
 with tab8:
-    st.header("🎮 Quest Completion Spoofer")
-    st.write("Complete active Discord Quests instantly without playing the game.")
-    quest_id = st.text_input("Quest ID", help="You can find this in the network tab when viewing quests.")
-    if st.button("Instantly Complete Quest"):
-        if token and quest_id:
+    st.header("🌈 Profile Theme & Pronoun Glitcher")
+    st.info("Directly edit profile metadata fields that are often restricted in the app.")
+    
+    col_x, col_y = st.columns(2)
+    with col_x:
+        pronoun_text = st.text_input("Pronouns (Unicode Support)", placeholder="verified ✅")
+        if st.button("Update Pronouns"):
             h = {"Authorization": token, "Content-Type": "application/json"}
-            url = f"https://discord.com/api/v9/users/@me/quests/{quest_id}/finish"
-            r = requests.post(url, headers=h)
-            if r.status_code == 200: st.success("Quest marked as completed!")
-            else: st.error(f"Failed. Status: {r.status_code}")
+            requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"pronouns": pronoun_text})
+            st.success("Pronouns Updated!")
 
-# --- TAB 9: ACTIVE DEV TRIGGER ---
-with tab9:
-    st.header("🛠️ Active Developer Badge Trigger")
-    app_id_dev = st.text_input("Application ID")
-    if st.button("Execute Dummy Command"):
-        if token and app_id_dev:
+    with col_y:
+        accent_color = st.color_picker("Choose Profile Accent Color")
+        if st.button("Apply Accent Color"):
             h = {"Authorization": token, "Content-Type": "application/json"}
-            # This registers and executes a heartbeat to satisfy the 'Active' requirement
-            url = f"https://discord.com/api/v9/applications/{app_id_dev}/commands"
-            payload = {"name": "hello", "description": "trigger", "type": 1}
-            r = requests.post(url, headers=h, json=payload)
-            if r.status_code in [200, 201]:
-                st.success("Activity recorded! Check eligibility at discord.com/developers/active-developer in 24 hours.")
-            else: st.error(f"Error: {r.text}")
+            # Converts hex to integer for Discord API
+            hex_int = int(accent_color.lstrip('#'), 16)
+            requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"accent_color": hex_int})
+            st.success("Theme Color Applied!")
