@@ -163,14 +163,24 @@ with tab1:
                                         continue
 
                                 requests.post(typing_url, headers=headers)
-                                chat_history = [{"role": "system", "content": system_prompt}]
+                                
+                                # --- REINFORCED MEMORY & PERSONA LOGIC ---
+                                chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}. You must maintain this character and use the provided conversation history to stay in context."}]
+                                
+                                # Fetch History for Context
                                 context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
                                 for m in reversed(context_req):
                                     role = "assistant" if m['author']['username'].lower() == my_username else "user"
                                     chat_history.append({"role": role, "content": m['content']})
 
-                                reply = client.chat.completions.create(model="openrouter/free", messages=chat_history).choices[0].message.content
+                                # Generate AI Reply with temperature control for personality
+                                reply = client.chat.completions.create(
+                                    model="openrouter/free", 
+                                    messages=chat_history,
+                                    temperature=0.8
+                                ).choices[0].message.content
                                 
+                                # Select Emoji
                                 if emoji_pool:
                                     prompt = f"Pick emoji from: {','.join(emoji_pool)}. Text: '{reply}'. ONLY emoji."
                                     chosen_emoji = client.chat.completions.create(model="openrouter/free", messages=[{"role": "user", "content": prompt}]).choices[0].message.content.strip()
@@ -182,7 +192,8 @@ with tab1:
                                 if reaction_delay > 0: time.sleep(reaction_delay)
                                 
                                 add_reaction(channel_id_input, msg_id, chosen_emoji, headers)
-                                log_to_csv(author, content, f"Reacted {chosen_emoji}")
+                                log_to_csv(author, content, f"Context Rep: {reply[:30]}")
+                                
                                 time.sleep(random.uniform(1, 2))
                                 requests.post(discord_url, json={"content": reply}, headers=headers)
                                 log_to_csv(my_username, reply, "Replied")
@@ -208,7 +219,7 @@ with tab1:
                 time.sleep(5)
                 continue 
 
-# --- TAB 2: HISTORY SCRAPER ---
+# --- TAB 2 & 3 ---
 with tab2:
     st.header("📥 Channel History Downloader")
     limit = st.number_input("Number of messages to fetch", min_value=1, max_value=100, value=50)
@@ -226,7 +237,6 @@ with tab2:
                     st.dataframe(df, use_container_width=True)
                     st.download_button(label="📥 Download History as CSV", data=df.to_csv(index=False).encode('utf-8'), file_name=f"discord_history_{channel_id_input}.csv", mime="text/csv")
 
-# --- TAB 3: GHOST WRITER ---
 with tab3:
     st.header("👻 Ghost Writer Management")
     st.write(f"Processed DM IDs: {len(st.session_state.processed_dms)}")
