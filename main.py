@@ -244,7 +244,7 @@ with tab3:
         st.session_state.processed_dms = set()
         st.success("DM Memory cleared.")
 
-# --- TAB 4: CHAMELEON ---
+# --- TAB 4: CHAMELEON (FIXED) ---
 with tab4:
     st.header("🎭 Identity Chameleon")
     target_id = st.text_input("Target User ID to Mimic")
@@ -252,11 +252,19 @@ with tab4:
         if token and target_id:
             h = {"Authorization": token}
             u_data = requests.get(f"https://discord.com/api/v9/users/{target_id}", headers=h).json()
-            if 'avatar' in u_data:
-                a_url = f"https://cdn.discordapp.com/avatars/{target_id}/{u_data['avatar']}.png"
-                img_b64 = base64.b64encode(requests.get(a_url).content).decode('utf-8')
-                requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"avatar": f"data:image/png;base64,{img_b64}"})
-                st.success(f"Successfully copied avatar of {u_data['username']}")
+            if 'avatar' in u_data and u_data['avatar']:
+                a_url = f"https://cdn.discordapp.com/avatars/{target_id}/{u_data['avatar']}.png?size=1024"
+                response = requests.get(a_url)
+                if response.status_code == 200:
+                    img_b64 = base64.b64encode(response.content).decode('utf-8')
+                    # Fixed avatar payload for PATCH
+                    patch_res = requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"avatar": f"data:image/png;base64,{img_b64}"})
+                    if patch_res.status_code == 200:
+                        st.success(f"Successfully copied avatar of {u_data['username']}")
+                    else:
+                        st.error(f"Failed to update avatar: {patch_res.text}")
+            else:
+                st.warning("Target user has no avatar to copy.")
 
 # --- TAB 5: SEARCH MINER ---
 with tab5:
@@ -281,7 +289,7 @@ with tab6:
             v_res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=h).json()
             st.write(v_res)
 
-# --- TAB 7: HYPESQUAD SPOOFER ---
+# --- TAB 7: HYPESQUAD SPOOFER (FIXED) ---
 with tab7:
     st.header("✨ HypeSquad Spoofer")
     house = st.selectbox("Select House", ["Bravery", "Brilliance", "Balance"])
@@ -291,25 +299,29 @@ with tab7:
             h = {"Authorization": token, "Content-Type": "application/json"}
             r = requests.post("https://discord.com/api/v9/hypesquad/online", headers=h, json={"house_id": house_map[house]})
             if r.status_code == 204: st.success(f"Now a member of {house}!")
+            else: st.error(f"Error: {r.text}")
 
-# --- TAB 8: PROFILE GLITCHER ---
+# --- TAB 8: PROFILE GLITCHER (FIXED) ---
 with tab8:
     st.header("🌈 Profile Theme & Pronoun Glitcher")
-    st.info("Directly edit profile metadata fields that are often restricted in the app.")
+    st.info("Directly edit profile metadata fields. Changes may take a minute to propagate to your client.")
     
     col_x, col_y = st.columns(2)
     with col_x:
         pronoun_text = st.text_input("Pronouns (Unicode Support)", placeholder="verified ✅")
         if st.button("Update Pronouns"):
             h = {"Authorization": token, "Content-Type": "application/json"}
-            requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"pronouns": pronoun_text})
-            st.success("Pronouns Updated!")
+            # Fixed endpoint for User Profile metadata
+            res = requests.patch("https://discord.com/api/v9/users/@me/profile", headers=h, json={"pronouns": pronoun_text})
+            if res.status_code == 200: st.success("Pronouns Updated!")
+            else: st.error(f"Error: {res.text}")
 
     with col_y:
         accent_color = st.color_picker("Choose Profile Accent Color")
         if st.button("Apply Accent Color"):
             h = {"Authorization": token, "Content-Type": "application/json"}
-            # Converts hex to integer for Discord API
             hex_int = int(accent_color.lstrip('#'), 16)
-            requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"accent_color": hex_int})
-            st.success("Theme Color Applied!")
+            # Accent color also resides in the profile metadata endpoint
+            res = requests.patch("https://discord.com/api/v9/users/@me/profile", headers=h, json={"accent_color": hex_int})
+            if res.status_code == 200: st.success("Theme Color Applied!")
+            else: st.error(f"Error: {res.text}")
