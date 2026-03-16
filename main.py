@@ -85,7 +85,7 @@ with st.sidebar:
     auto_restart = st.toggle("Auto-Restart (10min Idle)", value=True)
 
 # --- Tabs ---
-tab1, tab2, tab3 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "👻 Ghost Writer"])
+tab1, tab2, tab3 = st.tabs(["🤖 Bot Control", "📂 History Scraper", " Memory Management"])
 
 # --- TAB 1: BOT CONTROL ---
 with tab1:
@@ -238,7 +238,7 @@ with tab2:
                     st.download_button(label="📥 Download History as CSV", data=df.to_csv(index=False).encode('utf-8'), file_name=f"discord_history_{channel_id_input}.csv", mime="text/csv")
 
 with tab3:
-    st.header("👻 Ghost Writer Management")
+    st.header("Memory Management")
     st.write(f"Processed DM IDs: {len(st.session_state.processed_dms)}")
     if st.button("🗑️ Clear DM Memory", use_container_width=True):
         st.session_state.processed_dms = set()
