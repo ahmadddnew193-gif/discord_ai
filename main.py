@@ -245,26 +245,35 @@ with tab3:
         st.success("DM Memory cleared.")
 
 # --- TAB 4: CHAMELEON (FIXED) ---
+
+# --- TAB 4: CHAMELEON (SAFE MODE) ---
 with tab4:
-    st.header("🎭 Identity Chameleon")
+    st.header("🎭 Identity Chameleon (Safe Mode)")
+    st.warning("⚠️ Warning: Frequent avatar changes can lead to phone verification locks.")
     target_id = st.text_input("Target User ID to Mimic")
+    
     if st.button("Activate Mimicry", use_container_width=True):
         if token and target_id:
-            h = {"Authorization": token}
+            # Added a random delay to mimic human speed
+            time.sleep(random.uniform(2, 5)) 
+            
+            h = {
+                "Authorization": token,
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+            
             u_data = requests.get(f"https://discord.com/api/v9/users/{target_id}", headers=h).json()
             if 'avatar' in u_data and u_data['avatar']:
                 a_url = f"https://cdn.discordapp.com/avatars/{target_id}/{u_data['avatar']}.png?size=1024"
                 response = requests.get(a_url)
                 if response.status_code == 200:
                     img_b64 = base64.b64encode(response.content).decode('utf-8')
-                    # Fixed avatar payload for PATCH
                     patch_res = requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"avatar": f"data:image/png;base64,{img_b64}"})
+                    
                     if patch_res.status_code == 200:
-                        st.success(f"Successfully copied avatar of {u_data['username']}")
+                        st.success("Avatar copied! Wait 30s before doing this again.")
                     else:
-                        st.error(f"Failed to update avatar: {patch_res.text}")
-            else:
-                st.warning("Target user has no avatar to copy.")
+                        st.error("Discord is rate limiting your profile changes.")
 
 # --- TAB 5: SEARCH MINER ---
 with tab5:
