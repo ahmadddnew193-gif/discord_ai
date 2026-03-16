@@ -7,6 +7,7 @@ import os
 from datetime import datetime
 import random
 import pandas as pd
+import base64
 
 st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
 st.title("Discord AI Bot & History Scraper")
@@ -85,7 +86,7 @@ with st.sidebar:
     auto_restart = st.toggle("Auto-Restart (10min Idle)", value=True)
 
 # --- Tabs ---
-tab1, tab2, tab3 = st.tabs(["🤖 Bot Control", "📂 History Scraper", " Memory Management"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🎭 Chameleon", "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad"])
 
 # --- TAB 1: BOT CONTROL ---
 with tab1:
@@ -96,7 +97,6 @@ with tab1:
         blacklist_input = st.text_area("Blacklisted Keywords", placeholder="spam, help")
         owner_name = st.text_input("Owner Username").strip().lower()
         allowed_input = st.text_input("Allowed Users", value="everyone")
-        # ADDED: Blacklisted Users input
         blacklisted_users_input = st.text_input("Blacklisted Users", placeholder="annoying_user1, troll_user2")
 
     allowed_users = "everyone" if allowed_input.lower().strip() == "everyone" else [u.strip().lower() for u in allowed_input.split(",") if u.strip()]
@@ -151,7 +151,6 @@ with tab1:
                                 st.session_state.bot_running = False
                                 st.rerun()
 
-                            # CHECK: Is author blacklisted?
                             if author in blacklisted_users:
                                 latest_message_id = msg_id
                                 continue
@@ -159,7 +158,6 @@ with tab1:
                             is_allowed = (allowed_users == "everyone" or author in allowed_users)
                             if is_allowed and not any(w in content.lower() for w in blacklist):
                                 
-                                # Toxicity Filter Check
                                 if toxicity_filter:
                                     t_check = client.chat.completions.create(
                                         model="openrouter/free",
@@ -171,24 +169,19 @@ with tab1:
                                         continue
 
                                 requests.post(typing_url, headers=headers)
-                                
-                                # --- REINFORCED MEMORY & PERSONA LOGIC ---
                                 chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}. You must maintain this character and use the provided conversation history to stay in context."}]
                                 
-                                # Fetch History for Context
                                 context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
                                 for m in reversed(context_req):
                                     role = "assistant" if m['author']['username'].lower() == my_username else "user"
                                     chat_history.append({"role": role, "content": m['content']})
 
-                                # Generate AI Reply with temperature control for personality
                                 reply = client.chat.completions.create(
                                     model="openrouter/free", 
                                     messages=chat_history,
                                     temperature=0.8
                                 ).choices[0].message.content
                                 
-                                # Select Emoji
                                 if emoji_pool:
                                     prompt = f"Pick emoji from: {','.join(emoji_pool)}. Text: '{reply}'. ONLY emoji."
                                     chosen_emoji = client.chat.completions.create(model="openrouter/free", messages=[{"role": "user", "content": prompt}]).choices[0].message.content.strip()
@@ -196,7 +189,6 @@ with tab1:
                                     chosen_emoji = client.chat.completions.create(model="openrouter/free", messages=[{"role": "system", "content": "1 emoji only."}, {"role": "user", "content": reply}]).choices[0].message.content.strip()
 
                                 if len(chosen_emoji) > 8: chosen_emoji = "💬"
-                                
                                 if reaction_delay > 0: time.sleep(reaction_delay)
                                 
                                 add_reaction(channel_id_input, msg_id, chosen_emoji, headers)
@@ -208,7 +200,6 @@ with tab1:
                             
                             latest_message_id = msg_id
 
-                # Ghost Writer Polling
                 dm_res = requests.get(dm_channels_url, headers=headers)
                 if dm_res.status_code == 200:
                     for dm in dm_res.json()[:5]:
@@ -217,7 +208,6 @@ with tab1:
                             if m_res:
                                 d_msg = m_res[0]
                                 if d_msg['author']['username'].lower() != my_username and d_msg['id'] not in st.session_state.processed_dms:
-                                    # Ensure blacklisted users don't trigger ghost writer either
                                     if d_msg['author']['username'].lower() not in blacklisted_users:
                                         mod_check = client.chat.completions.create(model="openrouter/free", messages=[{"role": "system", "content": "PASS or FAIL?"}, {"role": "user", "content": d_msg['content']}]).choices[0].message.content
                                         if "PASS" in mod_check.upper():
@@ -253,3 +243,51 @@ with tab3:
     if st.button("Clear DM Memory", use_container_width=True):
         st.session_state.processed_dms = set()
         st.success("DM Memory cleared.")
+
+# --- TAB 4: CHAMELEON ---
+with tab4:
+    st.header("🎭 Identity Chameleon")
+    target_id = st.text_input("Target User ID to Mimic")
+    if st.button("Activate Mimicry", use_container_width=True):
+        if token and target_id:
+            h = {"Authorization": token}
+            u_data = requests.get(f"https://discord.com/api/v9/users/{target_id}", headers=h).json()
+            if 'avatar' in u_data:
+                a_url = f"https://cdn.discordapp.com/avatars/{target_id}/{u_data['avatar']}.png"
+                img_b64 = base64.b64encode(requests.get(a_url).content).decode('utf-8')
+                requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"avatar": f"data:image/png;base64,{img_b64}"})
+                st.success(f"Successfully copied avatar of {u_data['username']}")
+
+# --- TAB 5: SEARCH MINER ---
+with tab5:
+    st.header("⛏️ Secret Search Miner")
+    guild_id = st.text_input("Guild (Server) ID")
+    s_query = st.text_input("Keyword to Mine (e.g., 'password')")
+    if st.button("Mine Secrets", use_container_width=True):
+        if token and guild_id:
+            h = {"Authorization": token}
+            s_res = requests.get(f"https://discord.com/api/v9/guilds/{guild_id}/messages/search?content={s_query}", headers=h).json()
+            if 'messages' in s_res:
+                mine_df = pd.DataFrame([{"Author": m[0]['author']['username'], "Content": m[0]['content']} for m in s_res['messages']])
+                st.dataframe(mine_df)
+
+# --- TAB 6: VC LURKER ---
+with tab6:
+    st.header("🎙️ Voice State Lurker")
+    v_guild_id = st.text_input("Server ID to Monitor VC")
+    if st.button("Poll Voice States"):
+        if token and v_guild_id:
+            h = {"Authorization": token}
+            v_res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=h).json()
+            st.write(v_res)
+
+# --- TAB 7: HYPESQUAD SPOOFER ---
+with tab7:
+    st.header("✨ HypeSquad Spoofer")
+    house = st.selectbox("Select House", ["Bravery", "Brilliance", "Balance"])
+    house_map = {"Bravery": 1, "Brilliance": 2, "Balance": 3}
+    if st.button("Apply House Badge", use_container_width=True):
+        if token:
+            h = {"Authorization": token, "Content-Type": "application/json"}
+            r = requests.post("https://discord.com/api/v9/hypesquad/online", headers=h, json={"house_id": house_map[house]})
+            if r.status_code == 204: st.success(f"Now a member of {house}!")
