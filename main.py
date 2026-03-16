@@ -20,6 +20,8 @@ if "last_time" not in st.session_state:
     st.session_state.last_time = time.time()
 if "memory" not in st.session_state:
     st.session_state.memory = {}
+if "processed_dms" not in st.session_state:
+    st.session_state.processed_dms = set()
 
 # --- Helper Functions ---
 def log_to_csv(author, content, action):
@@ -62,6 +64,10 @@ with st.sidebar:
 
     or_key = st.text_input("OpenRouter API Key", type="password")
     channel_id_input = st.text_input("Channel ID")
+    
+    st.divider()
+    st.header("⚙️ Bot Settings")
+    memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5, help="How many past messages the AI should remember for context.")
 
 # --- Tabs ---
 tab1, tab2, tab3 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "👻 Ghost Writer"])
@@ -93,10 +99,12 @@ with tab1:
     if st.session_state.bot_running:
         headers = {"Authorization": token, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
+        dm_channels_url = "https://discord.com/api/v9/users/@me/channels"
         latest_message_id = None
         
         while st.session_state.bot_running:
             try:
+                # 1. Handle Public Channel Messages
                 r = requests.get(discord_url, headers=headers)
                 if r.status_code == 200:
                     msgs = r.json()
@@ -113,24 +121,49 @@ with tab1:
                             is_allowed = (allowed_users == "everyone" or author in allowed_users)
                             if is_allowed and not any(w in content.lower() for w in blacklist):
                                 add_reaction(channel_id_input, msg_id, "🧠", headers)
-                                time.sleep(random.uniform(2, 4))
+                                
+                                # Memory Depth Logic
+                                chat_history = [{"role": "system", "content": system_prompt}]
+                                # Fetch recent context based on slider
+                                context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
+                                for m in reversed(context_req):
+                                    role = "assistant" if m['author']['username'].lower() == my_username else "user"
+                                    chat_history.append({"role": role, "content": m['content']})
+
                                 reply = client.chat.completions.create(
                                     model="openrouter/free", 
-                                    messages=[{"role": "system", "content": system_prompt}, {"role": "user", "content": content}]
+                                    messages=chat_history
                                 ).choices[0].message.content
+                                
                                 requests.post(discord_url, json={"content": reply}, headers=headers)
                                 log_container.write(f"✅ Sent to {author}")
                             latest_message_id = msg_id
+
+                # 2. Ghost Writer (Integrated DM Polling)
+                dm_res = requests.get(dm_channels_url, headers=headers)
+                if dm_res.status_code == 200:
+                    for dm in dm_res.json()[:5]:
+                        if dm['type'] == 1:
+                            m_res = requests.get(f"https://discord.com/api/v9/channels/{dm['id']}/messages?limit=1", headers=headers).json()
+                            if m_res:
+                                d_msg = m_res[0]
+                                if d_msg['author']['username'].lower() != my_username and d_msg['id'] not in st.session_state.processed_dms:
+                                    mod_check = client.chat.completions.create(
+                                        model="openrouter/free",
+                                        messages=[{"role": "system", "content": "Reply PASS if safe, FAIL if toxic."}, {"role": "user", "content": d_msg['content']}]
+                                    ).choices[0].message.content
+                                    
+                                    if "PASS" in mod_check.upper():
+                                        requests.post(discord_url, json={"embeds": [{"title": " Ghost Message", "description": d_msg['content'], "color": 3447003}]}, headers=headers)
+                                    st.session_state.processed_dms.add(d_msg['id'])
+
                 time.sleep(4)
             except: break
 
 # --- TAB 2: HISTORY SCRAPER ---
 with tab2:
     st.header("📥 Channel History Downloader")
-    st.write("This tool fetches the last 100 messages from the provided Channel ID.")
-    
     limit = st.number_input("Number of messages to fetch", min_value=1, max_value=100, value=50)
-    
     if st.button("🔍 Fetch History"):
         if not token or not channel_id_input:
             st.error("Missing Token or Channel ID!")
@@ -138,69 +171,17 @@ with tab2:
             with st.spinner("Accessing Discord archives..."):
                 headers = {"Authorization": token, "Content-Type": "application/json"}
                 scrape_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}"
-                
                 res = requests.get(scrape_url, headers=headers)
-                
                 if res.status_code == 200:
                     data = res.json()
-                    history_list = []
-                    
-                    for m in data:
-                        history_list.append({
-                            "Timestamp": m['timestamp'],
-                            "Author": m['author']['username'],
-                            "Content": m['content']
-                        })
-                    
-                    df = pd.DataFrame(history_list)
+                    df = pd.DataFrame([{"Timestamp": m['timestamp'], "Author": m['author']['username'], "Content": m['content']} for m in data])
                     st.dataframe(df, use_container_width=True)
-                    
-                    csv_data = df.to_csv(index=False).encode('utf-8')
-                    st.download_button(
-                        label="📥 Download History as CSV",
-                        data=csv_data,
-                        file_name=f"discord_history_{channel_id_input}.csv",
-                        mime="text/csv"
-                    )
-                else:
-                    st.error(f"Error fetching history: {res.status_code}")
+                    st.download_button(label="📥 Download History as CSV", data=df.to_csv(index=False).encode('utf-8'), file_name=f"discord_history_{channel_id_input}.csv", mime="text/csv")
 
 # --- TAB 3: GHOST WRITER ---
 with tab3:
-    st.header("👻 Ghost Writer: Anonymous Suggestion Box")
-    st.info("Direct Message the bot to have your message posted anonymously in the target channel.")
-    
-    if st.button("🔄 Poll for Secret Messages"):
-        headers = {"Authorization": token, "Content-Type": "application/json"}
-        # Fetch Direct Messages (DMs)
-        dm_url = "https://discord.com/api/v9/users/@me/channels"
-        dm_channels = requests.get(dm_url, headers=headers).json()
-        
-        for dm in dm_channels:
-            if dm['type'] == 1: # Private DM
-                msgs = requests.get(f"https://discord.com/api/v9/channels/{dm['id']}/messages?limit=1", headers=headers).json()
-                if msgs:
-                    msg = msgs[0]
-                    # Don't process our own messages or already processed ones
-                    if msg['author']['username'].lower() != my_username:
-                        content = msg['content']
-                        
-                        # AI Moderation Check
-                        mod_check = client.chat.completions.create(
-                            model="openrouter/free",
-                            messages=[{"role": "system", "content": "Check if this message is toxic or doxxing. Reply PASS or FAIL."}, {"role": "user", "content": content}]
-                        ).choices[0].message.content
-                        
-                        if "PASS" in mod_check.upper():
-                            # Post to public channel anonymously
-                            payload = {
-                                "embeds": [{
-                                    "title": "👻 Anonymous Message",
-                                    "description": content,
-                                    "color": 3447003
-                                }]
-                            }
-                            requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", json=payload, headers=headers)
-                            st.success(f"Posted secret from {msg['author']['username']}")
-                        else:
-                            st.warning("A message failed AI moderation and was blocked.")
+    st.header("👻 Ghost Writer Management")
+    st.write(f"Processed DM IDs: {len(st.session_state.processed_dms)}")
+    if st.button("🗑️ Clear DM Memory"):
+        st.session_state.processed_dms = set()
+        st.success("DM Memory cleared. Bot will now re-process the latest DMs if polled.")
