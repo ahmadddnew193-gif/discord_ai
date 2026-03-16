@@ -24,6 +24,8 @@ if "processed_dms" not in st.session_state:
     st.session_state.processed_dms = set()
 if "last_webhook_token" not in st.session_state:
     st.session_state.last_webhook_token = None
+if "last_activity" not in st.session_state:
+    st.session_state.last_activity = time.time()
 
 # --- Helper Functions ---
 def log_to_csv(author, content, action):
@@ -72,10 +74,15 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ Bot Settings")
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
-    reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=10, value=2, help="How long to wait before adding a reaction.")
+    reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=10, value=2)
     
-    emoji_pool_raw = st.text_input("Custom Emoji Pool (Comma separated)", placeholder="🔥,💀,✅,🧠")
+    emoji_pool_raw = st.text_input("Custom Emoji Pool", placeholder="🔥,💀,✅,🧠")
     emoji_pool = [e.strip() for e in emoji_pool_raw.split(",") if e.strip()]
+
+    st.divider()
+    st.header("🛡️ Safety & Stability")
+    toxicity_filter = st.toggle("AI Toxicity/Self-Harm Filter", value=True)
+    auto_restart = st.toggle("Auto-Restart (10min Idle)", value=True)
 
 # --- Tabs ---
 tab1, tab2, tab3 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "👻 Ghost Writer"])
@@ -94,22 +101,39 @@ with tab1:
     blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
     client = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1") if or_key else None
 
-    if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
-        st.session_state.bot_running = True
-    if st.button("🛑 Stop Bot", use_container_width=True):
-        st.session_state.bot_running = False
-    
-    log_container = st.container(height=300)
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
+            st.session_state.bot_running = True
+            st.session_state.last_activity = time.time()
+    with c2:
+        if st.button("🛑 Stop Bot", use_container_width=True):
+            st.session_state.bot_running = False
+            if os.path.isfile('discord_audit_log.csv'):
+                with open('discord_audit_log.csv', 'rb') as f:
+                    st.download_button("📥 Download Final Backup", f, file_name="bot_backup.csv", mime="text/csv")
+
+    st.subheader("📊 Live Audit Log")
+    log_display = st.empty()
 
     if st.session_state.bot_running:
         headers = {"Authorization": token, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
+        typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
         dm_channels_url = "https://discord.com/api/v9/users/@me/channels"
         latest_message_id = None
         
         while st.session_state.bot_running:
             try:
-                r = requests.get(discord_url, headers=headers)
+                if os.path.isfile('discord_audit_log.csv'):
+                    df_log = pd.read_csv('discord_audit_log.csv').tail(10)
+                    log_display.table(df_log)
+
+                if auto_restart and (time.time() - st.session_state.last_activity > 600):
+                    st.session_state.last_activity = time.time()
+                    st.rerun()
+
+                r = requests.get(discord_url, headers=headers, timeout=10)
                 if r.status_code == 200:
                     msgs = r.json()
                     if msgs and isinstance(msgs, list):
@@ -117,6 +141,8 @@ with tab1:
                         author, content, msg_id = latest['author']['username'].lower(), latest['content'].strip(), latest['id']
 
                         if msg_id != latest_message_id and author != my_username:
+                            st.session_state.last_activity = time.time()
+                            
                             if author == owner_name and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 Offline."}, headers=headers)
                                 st.session_state.bot_running = False
@@ -125,46 +151,45 @@ with tab1:
                             is_allowed = (allowed_users == "everyone" or author in allowed_users)
                             if is_allowed and not any(w in content.lower() for w in blacklist):
                                 
+                                # Toxicity Filter Check
+                                if toxicity_filter:
+                                    t_check = client.chat.completions.create(
+                                        model="openrouter/free",
+                                        messages=[{"role": "system", "content": "Is this text toxic or self-harm? Reply SAFE or TOXIC only."}, {"role": "user", "content": content}]
+                                    ).choices[0].message.content
+                                    if "TOXIC" in t_check.upper():
+                                        log_to_csv(author, content, "BLOCKED (Toxicity)")
+                                        latest_message_id = msg_id
+                                        continue
+
+                                requests.post(typing_url, headers=headers)
                                 chat_history = [{"role": "system", "content": system_prompt}]
                                 context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
                                 for m in reversed(context_req):
                                     role = "assistant" if m['author']['username'].lower() == my_username else "user"
                                     chat_history.append({"role": role, "content": m['content']})
 
-                                # Generate AI Reply
-                                reply = client.chat.completions.create(
-                                    model="openrouter/free", 
-                                    messages=chat_history
-                                ).choices[0].message.content
+                                reply = client.chat.completions.create(model="openrouter/free", messages=chat_history).choices[0].message.content
                                 
-                                # Select Emoji
                                 if emoji_pool:
-                                    prompt = f"Pick the best emoji from this list: {','.join(emoji_pool)} for this text: '{reply}'. Reply with ONLY the emoji."
-                                    chosen_emoji = client.chat.completions.create(
-                                        model="openrouter/free",
-                                        messages=[{"role": "user", "content": prompt}]
-                                    ).choices[0].message.content.strip()
+                                    prompt = f"Pick emoji from: {','.join(emoji_pool)}. Text: '{reply}'. ONLY emoji."
+                                    chosen_emoji = client.chat.completions.create(model="openrouter/free", messages=[{"role": "user", "content": prompt}]).choices[0].message.content.strip()
                                 else:
-                                    chosen_emoji = client.chat.completions.create(
-                                        model="openrouter/free",
-                                        messages=[{"role": "system", "content": "Reply with 1 emoji only."}, {"role": "user", "content": reply}]
-                                    ).choices[0].message.content.strip()
+                                    chosen_emoji = client.chat.completions.create(model="openrouter/free", messages=[{"role": "system", "content": "1 emoji only."}, {"role": "user", "content": reply}]).choices[0].message.content.strip()
 
                                 if len(chosen_emoji) > 8: chosen_emoji = "💬"
                                 
-                                # --- Reaction Delay Implemented ---
-                                if reaction_delay > 0:
-                                    time.sleep(reaction_delay)
+                                if reaction_delay > 0: time.sleep(reaction_delay)
                                 
                                 add_reaction(channel_id_input, msg_id, chosen_emoji, headers)
-                                time.sleep(random.uniform(1, 2)) # Natural typing pause
-                                
+                                log_to_csv(author, content, f"Reacted {chosen_emoji}")
+                                time.sleep(random.uniform(1, 2))
                                 requests.post(discord_url, json={"content": reply}, headers=headers)
-                                log_container.write(f"✅ Sent to {author} [{chosen_emoji}]")
+                                log_to_csv(my_username, reply, "Replied")
                             
                             latest_message_id = msg_id
 
-                # Ghost Writer Integrated Polling
+                # Ghost Writer Polling
                 dm_res = requests.get(dm_channels_url, headers=headers)
                 if dm_res.status_code == 200:
                     for dm in dm_res.json()[:5]:
@@ -173,15 +198,15 @@ with tab1:
                             if m_res:
                                 d_msg = m_res[0]
                                 if d_msg['author']['username'].lower() != my_username and d_msg['id'] not in st.session_state.processed_dms:
-                                    mod_check = client.chat.completions.create(
-                                        model="openrouter/free",
-                                        messages=[{"role": "system", "content": "PASS or FAIL?"}, {"role": "user", "content": d_msg['content']}]
-                                    ).choices[0].message.content
+                                    mod_check = client.chat.completions.create(model="openrouter/free", messages=[{"role": "system", "content": "PASS or FAIL?"}, {"role": "user", "content": d_msg['content']}]).choices[0].message.content
                                     if "PASS" in mod_check.upper():
                                         requests.post(discord_url, json={"embeds": [{"title": "👻 Ghost Message", "description": d_msg['content'], "color": 3447003}]}, headers=headers)
                                     st.session_state.processed_dms.add(d_msg['id'])
+                
                 time.sleep(4)
-            except: break
+            except Exception as e:
+                time.sleep(5)
+                continue 
 
 # --- TAB 2: HISTORY SCRAPER ---
 with tab2:
