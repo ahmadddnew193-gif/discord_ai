@@ -72,8 +72,8 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ Bot Settings")
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
+    reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=10, value=2, help="How long to wait before adding a reaction.")
     
-    # --- NEW: Emoji Pool Setting ---
     emoji_pool_raw = st.text_input("Custom Emoji Pool (Comma separated)", placeholder="🔥,💀,✅,🧠")
     emoji_pool = [e.strip() for e in emoji_pool_raw.split(",") if e.strip()]
 
@@ -94,9 +94,9 @@ with tab1:
     blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
     client = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1") if or_key else None
 
-    if st.button("▶️ Launch Bot", disabled=not (my_username and or_key)):
+    if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
         st.session_state.bot_running = True
-    if st.button("🛑 Stop Bot"):
+    if st.button("🛑 Stop Bot", use_container_width=True):
         st.session_state.bot_running = False
     
     log_container = st.container(height=300)
@@ -131,32 +131,34 @@ with tab1:
                                     role = "assistant" if m['author']['username'].lower() == my_username else "user"
                                     chat_history.append({"role": role, "content": m['content']})
 
-                                # 1. Generate AI Reply
+                                # Generate AI Reply
                                 reply = client.chat.completions.create(
                                     model="openrouter/free", 
                                     messages=chat_history
                                 ).choices[0].message.content
                                 
-                                # 2. Emoji Logic
+                                # Select Emoji
                                 if emoji_pool:
-                                    # Pick from User Pool based on vibe
                                     prompt = f"Pick the best emoji from this list: {','.join(emoji_pool)} for this text: '{reply}'. Reply with ONLY the emoji."
                                     chosen_emoji = client.chat.completions.create(
                                         model="openrouter/free",
                                         messages=[{"role": "user", "content": prompt}]
                                     ).choices[0].message.content.strip()
                                 else:
-                                    # Full AI Freedom
                                     chosen_emoji = client.chat.completions.create(
                                         model="openrouter/free",
                                         messages=[{"role": "system", "content": "Reply with 1 emoji only."}, {"role": "user", "content": reply}]
                                     ).choices[0].message.content.strip()
 
-                                # Safety fallback
                                 if len(chosen_emoji) > 8: chosen_emoji = "💬"
                                 
+                                # --- Reaction Delay Implemented ---
+                                if reaction_delay > 0:
+                                    time.sleep(reaction_delay)
+                                
                                 add_reaction(channel_id_input, msg_id, chosen_emoji, headers)
-                                time.sleep(1)
+                                time.sleep(random.uniform(1, 2)) # Natural typing pause
+                                
                                 requests.post(discord_url, json={"content": reply}, headers=headers)
                                 log_container.write(f"✅ Sent to {author} [{chosen_emoji}]")
                             
@@ -181,4 +183,28 @@ with tab1:
                 time.sleep(4)
             except: break
 
-# (Tab 2 & 3 Logic continues as before...)
+# --- TAB 2: HISTORY SCRAPER ---
+with tab2:
+    st.header("📥 Channel History Downloader")
+    limit = st.number_input("Number of messages to fetch", min_value=1, max_value=100, value=50)
+    if st.button("🔍 Fetch History"):
+        if not token or not channel_id_input:
+            st.error("Missing Token or Channel ID!")
+        else:
+            with st.spinner("Accessing Discord archives..."):
+                headers = {"Authorization": token, "Content-Type": "application/json"}
+                scrape_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}"
+                res = requests.get(scrape_url, headers=headers)
+                if res.status_code == 200:
+                    data = res.json()
+                    df = pd.DataFrame([{"Timestamp": m['timestamp'], "Author": m['author']['username'], "Content": m['content']} for m in data])
+                    st.dataframe(df, use_container_width=True)
+                    st.download_button(label="📥 Download History as CSV", data=df.to_csv(index=False).encode('utf-8'), file_name=f"discord_history_{channel_id_input}.csv", mime="text/csv")
+
+# --- TAB 3: GHOST WRITER ---
+with tab3:
+    st.header("👻 Ghost Writer Management")
+    st.write(f"Processed DM IDs: {len(st.session_state.processed_dms)}")
+    if st.button("🗑️ Clear DM Memory", use_container_width=True):
+        st.session_state.processed_dms = set()
+        st.success("DM Memory cleared.")
