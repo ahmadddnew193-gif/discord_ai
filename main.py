@@ -8,8 +8,8 @@ from datetime import datetime
 import random
 import pandas as pd
 
-st.set_page_config(page_title="Discord AI Suite", page_icon="🛡️", layout="wide")
-st.title("🛡️ Discord AI Bot & History Scraper")
+st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
+st.title("Discord AI Bot & History Scraper")
 
 # --- Initialize Session State ---
 if "bot_running" not in st.session_state:
@@ -96,8 +96,11 @@ with tab1:
         blacklist_input = st.text_area("Blacklisted Keywords", placeholder="spam, help")
         owner_name = st.text_input("Owner Username").strip().lower()
         allowed_input = st.text_input("Allowed Users", value="everyone")
+        # ADDED: Blacklisted Users input
+        blacklisted_users_input = st.text_input("Blacklisted Users", placeholder="annoying_user1, troll_user2")
 
     allowed_users = "everyone" if allowed_input.lower().strip() == "everyone" else [u.strip().lower() for u in allowed_input.split(",") if u.strip()]
+    blacklisted_users = [u.strip().lower() for u in blacklisted_users_input.split(",") if u.strip()]
     blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
     client = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1") if or_key else None
 
@@ -147,6 +150,11 @@ with tab1:
                                 requests.post(discord_url, json={"content": "🛑 Offline."}, headers=headers)
                                 st.session_state.bot_running = False
                                 st.rerun()
+
+                            # CHECK: Is author blacklisted?
+                            if author in blacklisted_users:
+                                latest_message_id = msg_id
+                                continue
 
                             is_allowed = (allowed_users == "everyone" or author in allowed_users)
                             if is_allowed and not any(w in content.lower() for w in blacklist):
@@ -209,9 +217,11 @@ with tab1:
                             if m_res:
                                 d_msg = m_res[0]
                                 if d_msg['author']['username'].lower() != my_username and d_msg['id'] not in st.session_state.processed_dms:
-                                    mod_check = client.chat.completions.create(model="openrouter/free", messages=[{"role": "system", "content": "PASS or FAIL?"}, {"role": "user", "content": d_msg['content']}]).choices[0].message.content
-                                    if "PASS" in mod_check.upper():
-                                        requests.post(discord_url, json={"embeds": [{"title": "👻 Ghost Message", "description": d_msg['content'], "color": 3447003}]}, headers=headers)
+                                    # Ensure blacklisted users don't trigger ghost writer either
+                                    if d_msg['author']['username'].lower() not in blacklisted_users:
+                                        mod_check = client.chat.completions.create(model="openrouter/free", messages=[{"role": "system", "content": "PASS or FAIL?"}, {"role": "user", "content": d_msg['content']}]).choices[0].message.content
+                                        if "PASS" in mod_check.upper():
+                                            requests.post(discord_url, json={"embeds": [{"title": "👻 Ghost Message", "description": d_msg['content'], "color": 3447003}]}, headers=headers)
                                     st.session_state.processed_dms.add(d_msg['id'])
                 
                 time.sleep(4)
@@ -240,6 +250,6 @@ with tab2:
 with tab3:
     st.header("Memory Management")
     st.write(f"Processed DM IDs: {len(st.session_state.processed_dms)}")
-    if st.button("🗑️ Clear DM Memory", use_container_width=True):
+    if st.button("Clear DM Memory", use_container_width=True):
         st.session_state.processed_dms = set()
         st.success("DM Memory cleared.")
