@@ -29,6 +29,18 @@ if "last_activity" not in st.session_state:
     st.session_state.last_activity = time.time()
 
 # --- Helper Functions ---
+def jitter_delay(min_s=0.5, max_s=2.5):
+    """Adds a random sleep to mimic human behavior."""
+    time.sleep(random.uniform(min_s, max_s))
+
+def get_headers(tk):
+    """Returns human-like headers."""
+    return {
+        "Authorization": tk,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+    }
+
 def log_to_csv(author, content, action):
     file_exists = os.path.isfile('discord_audit_log.csv')
     with open('discord_audit_log.csv', mode='a', newline='', encoding='utf-8') as f:
@@ -38,8 +50,9 @@ def log_to_csv(author, content, action):
         writer.writerow([datetime.now().strftime('%Y-%m-%d %H:%M:%S'), author, content, action])
 
 def validate_token(tk):
-    headers = {"Authorization": tk, "Content-Type": "application/json"}
+    headers = get_headers(tk)
     try:
+        jitter_delay(0.2, 0.8)
         r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=5)
         if r.status_code == 200:
             if tk != st.session_state.last_webhook_token:
@@ -50,6 +63,7 @@ def validate_token(tk):
     return False, None
 
 def add_reaction(channel_id, message_id, emoji, headers):
+    jitter_delay(0.5, 1.5)
     encoded_emoji = requests.utils.quote(emoji)
     url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
     requests.put(url, headers=headers)
@@ -120,7 +134,7 @@ with tab1:
     log_display = st.empty()
 
     if st.session_state.bot_running:
-        headers = {"Authorization": token, "Content-Type": "application/json", "User-Agent": "Mozilla/5.0"}
+        headers = get_headers(token)
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
         dm_channels_url = "https://discord.com/api/v9/users/@me/channels"
@@ -136,6 +150,7 @@ with tab1:
                     st.session_state.last_activity = time.time()
                     st.rerun()
 
+                jitter_delay(1.0, 3.0)
                 r = requests.get(discord_url, headers=headers, timeout=10)
                 if r.status_code == 200:
                     msgs = r.json()
@@ -194,12 +209,13 @@ with tab1:
                                 add_reaction(channel_id_input, msg_id, chosen_emoji, headers)
                                 log_to_csv(author, content, f"Context Rep: {reply[:30]}")
                                 
-                                time.sleep(random.uniform(1, 2))
+                                jitter_delay(1.5, 3.5)
                                 requests.post(discord_url, json={"content": reply}, headers=headers)
                                 log_to_csv(my_username, reply, "Replied")
                             
                             latest_message_id = msg_id
 
+                jitter_delay(2.0, 4.0)
                 dm_res = requests.get(dm_channels_url, headers=headers)
                 if dm_res.status_code == 200:
                     for dm in dm_res.json()[:5]:
@@ -228,7 +244,8 @@ with tab2:
             st.error("Missing Token or Channel ID!")
         else:
             with st.spinner("Accessing Discord archives..."):
-                headers = {"Authorization": token, "Content-Type": "application/json"}
+                headers = get_headers(token)
+                jitter_delay(1.0, 2.0)
                 scrape_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}"
                 res = requests.get(scrape_url, headers=headers)
                 if res.status_code == 200:
@@ -244,8 +261,6 @@ with tab3:
         st.session_state.processed_dms = set()
         st.success("DM Memory cleared.")
 
-# --- TAB 4: CHAMELEON (FIXED) ---
-
 # --- TAB 4: CHAMELEON (SAFE MODE) ---
 with tab4:
     st.header("🎭 Identity Chameleon (Safe Mode)")
@@ -254,13 +269,8 @@ with tab4:
     
     if st.button("Activate Mimicry", use_container_width=True):
         if token and target_id:
-            # Added a random delay to mimic human speed
-            time.sleep(random.uniform(2, 5)) 
-            
-            h = {
-                "Authorization": token,
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-            }
+            jitter_delay(3.0, 7.0) # Longer jitter for high-risk action
+            h = get_headers(token)
             
             u_data = requests.get(f"https://discord.com/api/v9/users/{target_id}", headers=h).json()
             if 'avatar' in u_data and u_data['avatar']:
@@ -268,10 +278,11 @@ with tab4:
                 response = requests.get(a_url)
                 if response.status_code == 200:
                     img_b64 = base64.b64encode(response.content).decode('utf-8')
+                    jitter_delay(2.0, 4.0)
                     patch_res = requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"avatar": f"data:image/png;base64,{img_b64}"})
                     
                     if patch_res.status_code == 200:
-                        st.success("Avatar copied! Wait 30s before doing this again.")
+                        st.success("Avatar copied! Wait 60s before doing this again.")
                     else:
                         st.error("Discord is rate limiting your profile changes.")
 
@@ -282,7 +293,8 @@ with tab5:
     s_query = st.text_input("Keyword to Mine (e.g., 'password')")
     if st.button("Mine Secrets", use_container_width=True):
         if token and guild_id:
-            h = {"Authorization": token}
+            h = get_headers(token)
+            jitter_delay(1.5, 3.0)
             s_res = requests.get(f"https://discord.com/api/v9/guilds/{guild_id}/messages/search?content={s_query}", headers=h).json()
             if 'messages' in s_res:
                 mine_df = pd.DataFrame([{"Author": m[0]['author']['username'], "Content": m[0]['content']} for m in s_res['messages']])
@@ -294,7 +306,8 @@ with tab6:
     v_guild_id = st.text_input("Server ID to Monitor VC")
     if st.button("Poll Voice States"):
         if token and v_guild_id:
-            h = {"Authorization": token}
+            h = get_headers(token)
+            jitter_delay(1.0, 2.5)
             v_res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=h).json()
             st.write(v_res)
 
@@ -305,7 +318,8 @@ with tab7:
     house_map = {"Bravery": 1, "Brilliance": 2, "Balance": 3}
     if st.button("Apply House Badge", use_container_width=True):
         if token:
-            h = {"Authorization": token, "Content-Type": "application/json"}
+            h = get_headers(token)
+            jitter_delay(2.0, 5.0)
             r = requests.post("https://discord.com/api/v9/hypesquad/online", headers=h, json={"house_id": house_map[house]})
             if r.status_code == 204: st.success(f"Now a member of {house}!")
             else: st.error(f"Error: {r.text}")
@@ -319,8 +333,8 @@ with tab8:
     with col_x:
         pronoun_text = st.text_input("Pronouns (Unicode Support)", placeholder="verified ✅")
         if st.button("Update Pronouns"):
-            h = {"Authorization": token, "Content-Type": "application/json"}
-            # Fixed endpoint for User Profile metadata
+            h = get_headers(token)
+            jitter_delay(2.0, 4.0)
             res = requests.patch("https://discord.com/api/v9/users/@me/profile", headers=h, json={"pronouns": pronoun_text})
             if res.status_code == 200: st.success("Pronouns Updated!")
             else: st.error(f"Error: {res.text}")
@@ -328,9 +342,9 @@ with tab8:
     with col_y:
         accent_color = st.color_picker("Choose Profile Accent Color")
         if st.button("Apply Accent Color"):
-            h = {"Authorization": token, "Content-Type": "application/json"}
+            h = get_headers(token)
+            jitter_delay(2.0, 4.0)
             hex_int = int(accent_color.lstrip('#'), 16)
-            # Accent color also resides in the profile metadata endpoint
             res = requests.patch("https://discord.com/api/v9/users/@me/profile", headers=h, json={"accent_color": hex_int})
             if res.status_code == 200: st.success("Theme Color Applied!")
             else: st.error(f"Error: {res.text}")
