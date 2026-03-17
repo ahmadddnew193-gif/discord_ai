@@ -151,7 +151,10 @@ with tab1:
         headers = get_headers(token)
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
-        latest_message_id = None
+        
+        # Initialize latest_message_id with the current most recent message to avoid responding to old stuff on boot
+        init_req = requests.get(discord_url, headers=headers)
+        latest_message_id = init_req.json()[0]['id'] if init_req.status_code == 200 and init_req.json() else None
         
         while st.session_state.bot_running:
             if time.time() - st.session_state.get('last_heartbeat', 0) > 300:
@@ -173,8 +176,8 @@ with tab1:
                     msgs = r.json()
                     if msgs and isinstance(msgs, list):
                         latest = msgs[0]
-                        author = latest['author']['username'].lower()
-                        author_id_real = latest['author']['id']
+                        author_username = latest['author']['username'].lower()
+                        author_id_real = str(latest['author']['id'])
                         content = latest['content'].strip()
                         msg_id = latest['id']
 
@@ -183,29 +186,28 @@ with tab1:
                             st.sidebar.warning(f"Detection: Author ID({author_id_real}) vs Owner ID({owner_id_input})")
 
                         # --- OWNER CHECK ---
-                        is_owner = (owner_id_input and str(author_id_real) == str(owner_id_input))
+                        is_owner = (owner_id_input and author_id_real == str(owner_id_input))
 
-                        # MODIFIED LOGIC: Respond if it's a new message, AND (it's not me OR it IS the owner)
-                        if msg_id != latest_message_id and (author != my_username or is_owner):
+                        # LOGIC: Respond if new message AND (it's not me)
+                        # Exception: If I am the owner, don't reply to my own "shutdown" or regular msgs to avoid loops.
+                        if msg_id != latest_message_id and author_id_real != str(my_id):
                             st.session_state.last_activity = time.time()
                             latest_message_id = msg_id 
 
                             # --- SHUTDOWN CHECK ---
                             if is_owner and content.lower() == "shutdown":
-                                requests.post(discord_url, json={"content": "🛑 Owner recognized. Shutting down..."}, headers=headers)
-                                log_to_csv(author, content, "Owner Shutdown Triggered")
+                                requests.post(discord_url, json={"content": "🛑 Owner recognized. Shutting down system..."}, headers=headers)
+                                log_to_csv(author_username, content, "Owner Shutdown Triggered")
                                 st.session_state.bot_running = False
                                 st.rerun()
                                 break
 
                             # --- FILTERS ---
-                            if author in blacklisted_users and not is_owner:
+                            if author_username in blacklisted_users and not is_owner:
                                 continue
 
-                            # Owner ignores blacklist
                             skip_filters = False if is_owner else any(w in content.lower() for w in blacklist)
-                            
-                            is_allowed = (allowed_users == "everyone" or author in allowed_users or is_owner)
+                            is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
                             
                             if is_allowed and not skip_filters:
                                 requests.post(typing_url, headers=headers)
@@ -215,24 +217,22 @@ with tab1:
                                 
                                 if isinstance(context_req, list):
                                     for m in reversed(context_req):
-                                        role = "assistant" if m['author']['username'].lower() == my_username else "user"
+                                        role = "assistant" if str(m['author']['id']) == str(my_id) else "user"
                                         chat_history.append({"role": role, "content": m['content']})
 
                                 response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
                                 reply = response.choices[0].message.content
                                 
                                 if not enable_safety or safety_filter(reply):
-                                    # Owner Perk: Unique Reaction
                                     reaction_emoji = "👑" if is_owner else "💬"
                                     if reaction_delay > 0: time.sleep(reaction_delay)
                                     add_reaction(channel_id_input, msg_id, reaction_emoji, headers)
                                     
-                                    # Owner Perk: Instant Response
                                     final_delay = 0 if is_owner else resp_delay
                                     if final_delay > 0: time.sleep(final_delay)
                                     
                                     requests.post(discord_url, json={"content": reply}, headers=headers)
-                                    log_to_csv(author, content, "Replied (Owner Mode)" if is_owner else "Replied")
+                                    log_to_csv(author_username, content, "Replied (Owner Mode)" if is_owner else "Replied")
                                 else:
                                     log_to_csv("SYSTEM", "Blocked harmful output", "Safety Filter")
 
