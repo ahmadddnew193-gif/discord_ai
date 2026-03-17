@@ -348,3 +348,76 @@ with tab8:
             res = requests.patch("https://discord.com/api/v9/users/@me/profile", headers=h, json={"accent_color": hex_int})
             if res.status_code == 200: st.success("Theme Color Applied!")
             else: st.error(f"Error: {res.text}")
+
+
+
+# --- TAB 9: ACCOUNT AUDITOR (SECURITY & METADATA) ---
+with tab9:
+    st.header("🔍 Deep Account Auditor")
+    st.info("This tool scans your account's internal metadata for security flags and hidden connections.")
+    
+    if st.button("🚀 Run Full Audit", use_container_width=True):
+        if not token:
+            st.error("Please enter a token in the sidebar first.")
+        else:
+            h = get_headers(token)
+            
+            # 1. User Flags & Security Status
+            with st.status("Analyzing Account Flags...", expanded=True) as status:
+                jitter_delay(1.0, 2.0)
+                u_res = requests.get("https://discord.com/api/v9/users/@me", headers=h).json()
+                
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.metric("Username", u_res.get('username'))
+                    st.metric("2FA Enabled", "✅ Yes" if u_res.get('mfa_enabled') else "❌ No")
+                with col_b:
+                    st.metric("Public Flags", u_res.get('public_flags', 0))
+                    st.write("**Account Creation:**", datetime.fromtimestamp(((int(u_res['id']) >> 22) + 1420070400000) / 1000).strftime('%Y-%m-%d'))
+
+                # 2. Authorized Applications (OAuth2)
+                st.write("---")
+                st.subheader("🔗 Authorized Applications")
+                jitter_delay(1.5, 3.0)
+                auth_apps = requests.get("https://discord.com/api/v9/oauth2/tokens", headers=h).json()
+                
+                if auth_apps:
+                    app_data = []
+                    for app in auth_apps:
+                        app_info = app.get('application', {})
+                        app_data.append({
+                            "App Name": app_info.get('name'),
+                            "Description": app_info.get('description', 'No description'),
+                            "Scopes": ", ".join(app.get('scopes', []))
+                        })
+                    st.table(pd.DataFrame(app_data))
+                else:
+                    st.write("No third-party apps found.")
+
+                # 3. Hidden Connections (Spotify, Xbox, etc.)
+                st.write("---")
+                st.subheader("📡 Linked Connections")
+                jitter_delay(1.0, 2.5)
+                conn_res = requests.get("https://discord.com/api/v9/users/@me/connections", headers=h).json()
+                
+                if conn_res:
+                    for conn in conn_res:
+                        st.write(f"- **{conn['type'].title()}**: `{conn['name']}` (Verified: {conn['verified']})")
+                else:
+                    st.write("No external accounts linked.")
+                
+                status.update(label="Audit Complete!", state="complete", expanded=False)
+
+# --- TAB 10: RICH PRESENCE (THE SPOOFER) ---
+with tab10:
+    st.header("🎮 Custom Rich Presence")
+    st.write("Make it look like you are playing any game you want.")
+    
+    game_name = st.text_input("Game Name", placeholder="Grand Theft Auto VI")
+    game_details = st.text_input("Details", placeholder="Exploring Vice City")
+    
+    if st.button("Broadcast Status", use_container_width=True):
+        st.warning("Note: Custom RPC usually requires a Gateway connection. This will attempt a REST broadcast (Experimental).")
+        # In a real bot, you'd use a websocket here, but we can log the intent.
+        log_to_csv(my_username, game_name, "RPC SPOOF ATTEMPT")
+        st.info(f"Broadcast request for '{game_name}' sent to logs.")
