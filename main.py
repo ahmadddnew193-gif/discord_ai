@@ -71,7 +71,7 @@ def add_reaction(channel_id, message_id, emoji, headers):
 # --- Sidebar ---
 with st.sidebar:
     st.header("🔑 Authentication")
-    token = st.text_input("Discord Token", type="password", help="tutorial: https://gist.github.com/XielQs/90ab13b0c61c6888dae329199ea6aff3")
+    token = st.text_input("Discord Token", type="password")
     
     if token:
         is_valid, user_info = validate_token(token)
@@ -94,16 +94,11 @@ with st.sidebar:
     emoji_pool_raw = st.text_input("Custom Emoji Pool", placeholder="🔥,💀,✅,🧠")
     emoji_pool = [e.strip() for e in emoji_pool_raw.split(",") if e.strip()]
 
-    st.divider()
-    st.header("🛡️ Safety & Stability")
-    toxicity_filter = st.toggle("AI Toxicity/Self-Harm Filter", value=True)
-    auto_restart = st.toggle("Auto-Restart (10min Idle)", value=True)
-
 # --- Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
     "🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester", 
-    "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "🌈 Profile Glitcher",
-    "🛡️ Session Guard", "🧪 Token Entropy", "💎 Orb Spoofer", "Account Audit", "📢 Webhook Commander"
+    "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "❄️ Snowflake Decoder", 
+    "📱 App Hunter", "Account Audit", "📢 Webhook Commander"
 ])
 
 # --- TAB 1: BOT CONTROL ---
@@ -130,9 +125,6 @@ with tab1:
     with c2:
         if st.button("🛑 Stop Bot", use_container_width=True):
             st.session_state.bot_running = False
-            if os.path.isfile('discord_audit_log.csv'):
-                with open('discord_audit_log.csv', 'rb') as f:
-                    st.download_button("📥 Download Final Backup", f, file_name="bot_backup.csv", mime="text/csv")
 
     st.subheader("📊 Live Audit Log")
     log_display = st.empty()
@@ -149,10 +141,6 @@ with tab1:
                 if os.path.isfile('discord_audit_log.csv'):
                     df_log = pd.read_csv('discord_audit_log.csv').tail(10)
                     log_display.table(df_log)
-
-                if auto_restart and (time.time() - st.session_state.last_activity > 600):
-                    st.session_state.last_activity = time.time()
-                    st.rerun()
 
                 jitter_delay(1.0, 3.0)
                 r = requests.get(discord_url, headers=headers, timeout=10)
@@ -176,286 +164,122 @@ with tab1:
 
                             is_allowed = (allowed_users == "everyone" or author in allowed_users)
                             if is_allowed and not any(w in content.lower() for w in blacklist):
-                                
-                                if toxicity_filter:
-                                    t_check = client.chat.completions.create(
-                                        model="openrouter/free",
-                                        messages=[{"role": "system", "content": "Is this text toxic or self-harm? Reply SAFE or TOXIC only."}, {"role": "user", "content": content}]
-                                    ).choices[0].message.content
-                                    if "TOXIC" in t_check.upper():
-                                        log_to_csv(author, content, "BLOCKED (Toxicity)")
-                                        latest_message_id = msg_id
-                                        continue
-
                                 requests.post(typing_url, headers=headers)
-                                chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}. You must maintain this character and use the provided conversation history to stay in context."}]
-                                
+                                chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
                                 context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
                                 for m in reversed(context_req):
                                     role = "assistant" if m['author']['username'].lower() == my_username else "user"
                                     chat_history.append({"role": role, "content": m['content']})
 
-                                reply = client.chat.completions.create(
-                                    model="openrouter/free", 
-                                    messages=chat_history,
-                                    temperature=0.8
-                                ).choices[0].message.content
-                                
-                                if emoji_pool:
-                                    prompt = f"Pick emoji from: {','.join(emoji_pool)}. Text: '{reply}'. ONLY emoji."
-                                    chosen_emoji = client.chat.completions.create(model="openrouter/free", messages=[{"role": "user", "content": prompt}]).choices[0].message.content.strip()
-                                else:
-                                    chosen_emoji = client.chat.completions.create(model="openrouter/free", messages=[{"role": "system", "content": "1 emoji only."}, {"role": "user", "content": reply}]).choices[0].message.content.strip()
-
-                                if len(chosen_emoji) > 8: chosen_emoji = "💬"
+                                reply = client.chat.completions.create(model="openrouter/free", messages=chat_history).choices[0].message.content
                                 if reaction_delay > 0: time.sleep(reaction_delay)
                                 
-                                add_reaction(channel_id_input, msg_id, chosen_emoji, headers)
-                                log_to_csv(author, content, f"Context Rep: {reply[:30]}")
-                                
+                                add_reaction(channel_id_input, msg_id, "💬", headers)
                                 jitter_delay(1.5, 3.5)
                                 requests.post(discord_url, json={"content": reply}, headers=headers)
-                                log_to_csv(my_username, reply, "Replied")
                             
                             latest_message_id = msg_id
 
-                jitter_delay(2.0, 4.0)
-                dm_res = requests.get(dm_channels_url, headers=headers)
-                if dm_res.status_code == 200:
-                    for dm in dm_res.json()[:5]:
-                        if dm['type'] == 1:
-                            m_res = requests.get(f"https://discord.com/api/v9/channels/{dm['id']}/messages?limit=1", headers=headers).json()
-                            if m_res:
-                                d_msg = m_res[0]
-                                if d_msg['author']['username'].lower() != my_username and d_msg['id'] not in st.session_state.processed_dms:
-                                    if d_msg['author']['username'].lower() not in blacklisted_users:
-                                        mod_check = client.chat.completions.create(model="openrouter/free", messages=[{"role": "system", "content": "PASS or FAIL?"}, {"role": "user", "content": d_msg['content']}]).choices[0].message.content
-                                        if "PASS" in mod_check.upper():
-                                            requests.post(discord_url, json={"embeds": [{"title": "👻 Ghost Message", "description": d_msg['content'], "color": 3447003}]}, headers=headers)
-                                    st.session_state.processed_dms.add(d_msg['id'])
-                
                 time.sleep(4)
             except Exception as e:
                 time.sleep(5)
                 continue 
 
-# --- TAB 2 & 3 ---
+# --- TAB 2: SCRAPER ---
 with tab2:
-    st.header("📥 Channel History Downloader")
-    limit = st.number_input("Number of messages to fetch", min_value=1, max_value=100, value=50)
-    if st.button("🔍 Fetch History"):
-        if not token or not channel_id_input:
-            st.error("Missing Token or Channel ID!")
-        else:
-            with st.spinner("Accessing Discord archives..."):
-                headers = get_headers(token)
-                jitter_delay(1.0, 2.0)
-                scrape_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}"
-                res = requests.get(scrape_url, headers=headers)
-                if res.status_code == 200:
-                    data = res.json()
-                    df = pd.DataFrame([{"Timestamp": m['timestamp'], "Author": m['author']['username'], "Content": m['content']} for m in data])
-                    st.dataframe(df, use_container_width=True)
-                    st.download_button(label="📥 Download History as CSV", data=df.to_csv(index=False).encode('utf-8'), file_name=f"discord_history_{channel_id_input}.csv", mime="text/csv")
+    st.header("📥 Channel History Scraper")
+    limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
+    if st.button("🔍 Scrape"):
+        headers = get_headers(token)
+        res = requests.get(f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}", headers=headers)
+        if res.status_code == 200:
+            st.dataframe(pd.DataFrame([{"Author": m['author']['username'], "Content": m['content']} for m in res.json()]))
 
+# --- TAB 3: MEMORY ---
 with tab3:
-    st.header("Memory Management")
-    st.write(f"Processed DM IDs: {len(st.session_state.processed_dms)}")
-    if st.button("Clear DM Memory", use_container_width=True):
+    st.header("🧠 DM Memory")
+    if st.button("Clear Cache"):
         st.session_state.processed_dms = set()
-        st.success("DM Memory cleared.")
+        st.success("Cleared.")
 
-# --- TAB 4: SERVER DATA HARVESTER (SAFE) ---
+# --- TAB 4: HARVESTER ---
 with tab4:
-    st.header("🌾 Server Data Harvester")
-    st.info("Extract emojis and icons from any server you are in. This is a safe 'Read' action.")
-    target_guild = st.text_input("Server ID to Harvest")
-    
-    col_em, col_ic = st.columns(2)
-    with col_em:
-        if st.button("📥 Extract Emojis", use_container_width=True):
-            if token and target_guild:
-                h = get_headers(token)
-                jitter_delay(1.0, 2.0)
-                res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild}", headers=h).json()
-                if 'emojis' in res:
-                    for e in res['emojis']:
-                        ext = "gif" if e['animated'] else "png"
-                        url = f"https://cdn.discordapp.com/emojis/{e['id']}.{ext}"
-                        st.write(f"**{e['name']}**")
-                        st.image(url, width=64)
-                        st.caption(f"[Download Link]({url})")
-                else: st.error("Could not find emojis. Make sure the ID is correct.")
+    st.header("🌾 Server Harvester")
+    target_guild = st.text_input("Target Server ID")
+    if st.button("📥 Harvest Emojis"):
+        res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild}", headers=get_headers(token)).json()
+        if 'emojis' in res:
+            for e in res['emojis']:
+                url = f"https://cdn.discordapp.com/emojis/{e['id']}.png"
+                st.image(url, width=64, caption=e['name'])
 
-    with col_ic:
-        if st.button("🖼️ Get Server Icon", use_container_width=True):
-            if token and target_guild:
-                h = get_headers(token)
-                res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild}", headers=h).json()
-                if 'icon' in res and res['icon']:
-                    icon_url = f"https://cdn.discordapp.com/icons/{target_guild}/{res['icon']}.png?size=1024"
-                    st.image(icon_url, caption="Server Icon")
-                    st.download_button("Download Icon", requests.get(icon_url).content, "icon.png")
-
-# --- TAB 5: SEARCH MINER ---
+# --- TAB 5: MINER ---
 with tab5:
-    st.header("⛏️ Secret Search Miner")
-    guild_id = st.text_input("Guild (Server) ID")
-    s_query = st.text_input("Keyword to Mine (e.g., 'password')")
-    if st.button("Mine Secrets", use_container_width=True):
-        if token and guild_id:
-            h = get_headers(token)
-            jitter_delay(1.5, 3.0)
-            s_res = requests.get(f"https://discord.com/api/v9/guilds/{guild_id}/messages/search?content={s_query}", headers=h).json()
-            if 'messages' in s_res:
-                mine_df = pd.DataFrame([{"Author": m[0]['author']['username'], "Content": m[0]['content']} for m in s_res['messages']])
-                st.dataframe(mine_df)
+    st.header("⛏️ Search Miner")
+    guild_id = st.text_input("Guild ID")
+    s_query = st.text_input("Keyword")
+    if st.button("Mine"):
+        s_res = requests.get(f"https://discord.com/api/v9/guilds/{guild_id}/messages/search?content={s_query}", headers=get_headers(token)).json()
+        if 'messages' in s_res:
+            st.write(s_res['messages'])
 
 # --- TAB 6: VC LURKER ---
 with tab6:
-    st.header("🎙️ Voice State Lurker")
-    v_guild_id = st.text_input("Server ID to Monitor VC")
-    if st.button("Poll Voice States"):
-        if token and v_guild_id:
-            h = get_headers(token)
-            jitter_delay(1.0, 2.5)
-            v_res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=h).json()
-            st.write(v_res)
+    st.header("🎙️ VC Lurker")
+    v_guild_id = st.text_input("Voice Guild ID")
+    if st.button("Poll VC"):
+        res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=get_headers(token)).json()
+        st.write(res)
 
-# --- TAB 7: HYPESQUAD SPOOFER ---
+# --- TAB 7: HYPESQUAD ---
 with tab7:
     st.header("✨ HypeSquad Spoofer")
-    house = st.selectbox("Select House", ["Bravery", "Brilliance", "Balance"])
+    house = st.selectbox("House", ["Bravery", "Brilliance", "Balance"])
     house_map = {"Bravery": 1, "Brilliance": 2, "Balance": 3}
-    if st.button("Apply House Badge", use_container_width=True):
-        if token:
-            h = get_headers(token)
-            jitter_delay(2.0, 5.0)
-            r = requests.post("https://discord.com/api/v9/hypesquad/online", headers=h, json={"house_id": house_map[house]})
-            if r.status_code == 204: st.success(f"Now a member of {house}!")
-            else: st.error(f"Error: {r.text}")
+    if st.button("Apply"):
+        requests.post("https://discord.com/api/v9/hypesquad/online", headers=get_headers(token), json={"house_id": house_map[house]})
+        st.success("House Applied")
 
-# --- TAB 8: PROFILE GLITCHER ---
+# --- TAB 8: SNOWFLAKE DECODER (NEW) ---
 with tab8:
-    st.header("🌈 Profile Theme & Pronoun Glitcher")
-    st.info("Directly edit profile metadata fields. Changes may take a minute to propagate.")
-    
-    col_x, col_y = st.columns(2)
-    with col_x:
-        pronoun_text = st.text_input("Pronouns (Unicode Support)", placeholder="verified ✅")
-        if st.button("Update Pronouns"):
-            h = get_headers(token)
-            jitter_delay(2.0, 4.0)
-            res = requests.patch("https://discord.com/api/v9/users/@me/profile", headers=h, json={"pronouns": pronoun_text})
-            if res.status_code == 200: st.success("Pronouns Updated!")
-            else: st.error(f"Error: {res.text}")
+    st.header("❄️ Snowflake Age Decoder")
+    st.info("Every Discord ID contains a timestamp. Decode it to see when an account was born.")
+    input_id = st.text_input("Enter User or Server ID")
+    if st.button("📅 Decode Timestamp", use_container_width=True):
+        if input_id.isdigit():
+            timestamp = (int(input_id) >> 22) + 1420070400000
+            date_obj = datetime.fromtimestamp(timestamp / 1000.0)
+            st.success(f"Creation Date: **{date_obj.strftime('%Y-%m-%d %H:%M:%S')} UTC**")
+        else: st.error("Please enter a valid numeric ID.")
 
-    with col_y:
-        accent_color = st.color_picker("Choose Profile Accent Color")
-        if st.button("Apply Accent Color"):
-            h = get_headers(token)
-            jitter_delay(2.0, 4.0)
-            hex_int = int(accent_color.lstrip('#'), 16)
-            res = requests.patch("https://discord.com/api/v9/users/@me/profile", headers=h, json={"accent_color": hex_int})
-            if res.status_code == 200: st.success("Theme Color Applied!")
-            else: st.error(f"Error: {res.text}")
-
-# --- TAB 9: SESSION GUARD (NEW) ---
+# --- TAB 9: APP HUNTER (NEW) ---
 with tab9:
-    st.header("🛡️ Session Guard (Nuke)")
-    st.info("Monitor and manage active logins. If you see an unknown IP, reset your password immediately.")
-    if st.button("🔍 Scan Active Sessions", use_container_width=True):
+    st.header("📱 Authorized App Hunter")
+    st.info("Find hidden applications and legacy tools connected to your token.")
+    if st.button("🔍 Scan Applications", use_container_width=True):
         if token:
             h = get_headers(token)
-            jitter_delay(1.0, 2.0)
-            res = requests.get("https://discord.com/api/v9/users/@me/sessions", headers=h)
-            if res.status_code == 200:
-                sessions = res.json()
-                for s in sessions:
-                    with st.expander(f"💻 {s.get('client_info', {}).get('os')} - {s.get('client_info', {}).get('client')}"):
-                        st.write(f"**IP Address:** `{s.get('ip_addr')}`")
-                        st.write(f"**Location:** {s.get('city')}, {s.get('country_name')}")
-                        st.write(f"**Session ID:** `{s.get('session_id')}`")
-                        if s.get('approx_last_used_time'):
-                            st.write(f"**Last Used:** {s.get('approx_last_used_time')}")
-            else: st.error("Failed to fetch sessions. This endpoint might be restricted.")
+            apps = requests.get("https://discord.com/api/v9/oauth2/tokens", headers=h).json()
+            if apps:
+                for a in apps:
+                    app_name = a.get('application', {}).get('name', 'Unknown')
+                    with st.expander(f"📲 {app_name}"):
+                        st.write(f"**Description:** {a.get('application', {}).get('description')}")
+                        st.write(f"**Scopes:** `{', '.join(a.get('scopes', []))}`")
+            else: st.info("No external applications found.")
 
-# --- TAB 10: TOKEN ENTROPY (NEW) ---
+# --- TAB 10: AUDIT ---
 with tab10:
-    st.header("🧪 Token Entropy & Flags")
-    st.info("Check your account's 'Internal Heat' and Shadowban status.")
-    if st.button("🚀 Analyze Token Flags", use_container_width=True):
-        if token:
-            h = get_headers(token)
-            jitter_delay(1.0, 2.0)
-            u_res = requests.get("https://discord.com/api/v9/users/@me", headers=h).json()
-            flags = u_res.get('flags', 0)
-            st.metric("Raw Flag Value", flags)
-            
-            if flags == 0: st.success("Account Health: Clean")
-            elif flags >= 1048576: st.warning("Flag detected: Potential Spam/Botting flag.")
-            
-            st.write("---")
-            st.subheader("📡 Connection Stability")
-            latency = requests.get("https://discord.com/api/v9/gateway").elapsed.total_seconds()
-            st.write(f"API Latency: `{latency}s`")
-            if latency > 1.0: st.error("High Latency: Your token is under heavy load or ratelimits.")
+    st.header("🔍 Account Auditor")
+    if st.button("Run Audit"):
+        u_res = requests.get("https://discord.com/api/v9/users/@me", headers=get_headers(token)).json()
+        st.json(u_res)
 
-# --- TAB 11: ORB QUEST SPOOFER (NEW) ---
+# --- TAB 11: WEBHOOK ---
 with tab11:
-    st.header("💎 Orb Quest Spoofer")
-    st.info("View hidden Quests and grab IDs for the Heartbeat Bypass.")
-    if st.button("🛰️ Scan for Orb Quests", use_container_width=True):
-        if token:
-            h = get_headers(token)
-            jitter_delay(1.0, 2.0)
-            res = requests.get("https://discord.com/api/v9/users/@me/quests", headers=h)
-            if res.status_code == 200:
-                quests = res.json().get('quests', [])
-                if quests:
-                    for q in quests:
-                        st.subheader(f"🎁 {q['config']['messages']['game_title']}")
-                        st.write(f"**Quest ID:** `{q['id']}`")
-                        st.write(f"**Reward:** {q['config']['messages']['reward_title']}")
-                        st.progress(q.get('progress', 0) / 100)
-                else: st.info("No active quests found. Check the Discovery tab.")
-            else: st.error("Quest API Error. Are you using a verified account?")
-
-# --- TAB 12: ACCOUNT AUDITOR ---
-with tab12:
-    st.header("🔍 Deep Account Auditor")
-    if st.button("🚀 Run Full Audit", use_container_width=True):
-        if token:
-            h = get_headers(token)
-            with st.status("Analyzing Account Flags...", expanded=True) as status:
-                jitter_delay(1.0, 2.0)
-                u_res = requests.get("https://discord.com/api/v9/users/@me", headers=h).json()
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    st.metric("Username", u_res.get('username'))
-                    st.metric("2FA Enabled", "✅ Yes" if u_res.get('mfa_enabled') else "❌ No")
-                with col_b:
-                    st.metric("Public Flags", u_res.get('public_flags', 0))
-                
-                st.write("---")
-                st.subheader("🔗 Authorized Applications")
-                auth_apps = requests.get("https://discord.com/api/v9/oauth2/tokens", headers=h).json()
-                if auth_apps:
-                    st.table(pd.DataFrame([{"Name": a.get('application', {}).get('name'), "Scopes": ", ".join(a.get('scopes', []))} for a in auth_apps]))
-                
-                status.update(label="Audit Complete!", state="complete", expanded=False)
-
-# --- TAB 13: WEBHOOK COMMANDER (SAFE) ---
-with tab13:
     st.header("📢 Webhook Commander")
-    st.info("Send messages as a customized webhook. This uses NO account tokens and is 100% safe.")
     wh_url = st.text_input("Webhook URL")
-    wh_name = st.text_input("Custom Display Name", placeholder="System Admin")
-    wh_msg = st.text_area("Message Content")
-    
-    if st.button("🚀 Fire Webhook", use_container_width=True):
-        if wh_url and wh_msg:
-            payload = {"content": wh_msg, "username": wh_name}
-            r = requests.post(wh_url, json=payload)
-            if r.status_code < 300: st.success("Message Sent via Webhook!")
-            else: st.error(f"Failed: {r.text}")
+    wh_msg = st.text_area("Message")
+    if st.button("Fire"):
+        requests.post(wh_url, json={"content": wh_msg})
+        st.success("Sent")
