@@ -33,6 +33,8 @@ if "last_activity" not in st.session_state:
     st.session_state.last_activity = time.time()
 if "typing_active" not in st.session_state:
     st.session_state.typing_active = False
+if "latest_message_id" not in st.session_state:
+    st.session_state.latest_message_id = None
 
 # --- Helper Functions ---
 def jitter_delay(min_s=0.1, max_s=0.5):
@@ -68,7 +70,6 @@ def validate_token(tk):
     return False, None
 
 def add_reaction(channel_id, message_id, emoji, headers):
-    # Removed heavy delay for instant feedback
     encoded_emoji = requests.utils.quote(emoji)
     url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
     requests.put(url, headers=headers)
@@ -81,19 +82,16 @@ def safety_filter(text):
             return False
     return True
 
-def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay):
-    """Handles AI logic in a separate thread to prevent blocking."""
+def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, channel_id_input):
+    """Handles AI logic in a separate thread."""
     try:
         author_username = latest['author']['username'].lower()
         content = latest['content'].strip()
         msg_id = latest['id']
-        is_owner = str(latest['author']['id']) == str(owner_id_input)
 
         # 1. Feedback
         requests.post(typing_url, headers=headers)
-        reaction_emoji = "👑" if is_owner else "💬"
-        if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
-        add_reaction(channel_id_input, msg_id, reaction_emoji, headers)
+        add_reaction(channel_id_input, msg_id, "👑", headers)
 
         # 2. Context
         chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
@@ -108,8 +106,13 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         reply = response.choices[0].message.content
         
         if not enable_safety or safety_filter(reply):
-            if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
-            requests.post(discord_url, json={"content": reply}, headers=headers)
+            if resp_delay > 0: time.sleep(resp_delay)
+            send_res = requests.post(discord_url, json={"content": reply}, headers=headers)
+            
+            # LOOP FIX: Update session state with the sent message ID so the main loop ignores it
+            if send_res.status_code == 200:
+                st.session_state.latest_message_id = send_res.json()['id']
+                
             log_to_csv(author_username, content, "Threaded Reply")
     except:
         pass
@@ -127,11 +130,9 @@ with st.sidebar:
             my_id = user_info['id']
         else:
             st.error("❌ Invalid Token")
-            my_username = None
-            my_id = None
+            my_username, my_id = None, None
     else: 
-        my_username = None
-        my_id = None
+        my_username, my_id = None, None
 
     or_key = st.text_input("OpenRouter API Key", type="password")
     channel_id_input = st.text_input("Channel ID")
@@ -181,7 +182,6 @@ with tab1:
         if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
             st.session_state.bot_running = True
             st.session_state.last_activity = time.time()
-            st.session_state.last_heartbeat = time.time()
             st.rerun()
     with c2:
         if st.button("🛑 Stop Bot", use_container_width=True):
@@ -196,8 +196,10 @@ with tab1:
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
         
+        # Initial check to ignore old messages
         init_r = requests.get(discord_url, headers=headers)
-        latest_message_id = init_r.json()[0]['id'] if init_r.status_code == 200 and init_r.json() else None
+        if init_r.status_code == 200 and init_r.json():
+            st.session_state.latest_message_id = init_r.json()[0]['id']
         
         while st.session_state.bot_running:
             try:
@@ -212,38 +214,26 @@ with tab1:
                     msgs = r.json()
                     if msgs and isinstance(msgs, list):
                         latest = msgs[0]
-                        author_username = latest['author']['username'].lower()
                         author_id_real = str(latest['author']['id'])
                         content = latest['content'].strip()
                         msg_id = latest['id']
 
-                        is_owner = (owner_id_input and author_id_real == str(owner_id_input))
-
                         # --- PROCESS NEW MESSAGE ---
-                        if msg_id != latest_message_id:
-                            status_box.warning("Status: ⚡ Triggered!")
-                            latest_message_id = msg_id 
+                        if msg_id != st.session_state.latest_message_id:
+                            st.session_state.latest_message_id = msg_id # Update immediately
                             st.session_state.last_activity = time.time()
 
-                            # 1. SHUTDOWN (Instant)
-                            if is_owner and content.lower() == "shutdown":
-                                requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
-                                log_to_csv(author_username, content, "Shutdown")
-                                st.session_state.bot_running = False
-                                st.rerun()
-                                break
-
-                            # 2. FILTER & ASYNC REPLY
-                            if author_username in blacklisted_users and not is_owner:
-                                continue
-
-                            skip_filters = False if is_owner else any(w in content.lower() for w in blacklist)
-                            is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
-                            
-                            if is_allowed and not skip_filters:
-                                status_box.warning("Status: 🧠 Background Processing...")
-                                # OFF-LOAD TO THREAD: This keeps the loop running!
-                                executor.submit(background_reply, latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay)
+                            # 1. OWNER-ONLY & SHUTDOWN CHECK
+                            if owner_id_input and author_id_real == str(owner_id_input):
+                                if content.lower() == "shutdown":
+                                    requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
+                                    st.session_state.bot_running = False
+                                    st.rerun()
+                                    break
+                                
+                                # 2. ASYNC REPLY (Only for owner)
+                                status_box.warning("Status: 🧠 Processing Owner Request...")
+                                executor.submit(background_reply, latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, channel_id_input)
 
                 status_box.info("Status: 🟢 Running / Idle")
                 time.sleep(poll_speed)
@@ -252,7 +242,7 @@ with tab1:
                 time.sleep(poll_speed)
                 continue
 
-# --- TABS 2-14 REMAIN UNCHANGED ---
+# --- TABS 2-14 ---
 with tab2:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
