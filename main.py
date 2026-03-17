@@ -27,6 +27,8 @@ if "last_webhook_token" not in st.session_state:
     st.session_state.last_webhook_token = None
 if "last_activity" not in st.session_state:
     st.session_state.last_activity = time.time()
+if "typing_active" not in st.session_state:
+    st.session_state.typing_active = False
 
 # --- Helper Functions ---
 def jitter_delay(min_s=0.5, max_s=2.5):
@@ -99,10 +101,10 @@ with st.sidebar:
     emoji_pool = [e.strip() for e in emoji_pool_raw.split(",") if e.strip()]
 
 # --- Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13, tab14 = st.tabs([
     "🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester", 
     "💎 Free Emoji", "❄️ Snowflake Decoder", "📱 App Hunter", "🎙️ VC Lurker", 
-    "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander", "👻 Message Ghoster", "🎨 Text Color"
+    "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander", "👻 Message Ghoster", "🎨 Text Color", "⏳ Infinite Typing"
 ])
 
 # --- TAB 1: BOT CONTROL ---
@@ -321,9 +323,36 @@ with tab13:
     
     if st.button("🖌️ Send Colored Text", use_container_width=True):
         code = color_codes[color_choice]
-        # Discord ANSI format: ```ansi\n[ESC][{code}m{text}```
         ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
         requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", 
                       headers=get_headers(token), 
                       json={"content": ansi_payload})
         st.success("Colored Message Sent!")
+
+# --- TAB 14: INFINITE TYPING ---
+with tab14:
+    st.header("⏳ Infinite Typing Indicator")
+    st.info("Keeps the 'typing...' status active in the selected channel indefinitely.")
+    
+    type_col1, type_col2 = st.columns(2)
+    with type_col1:
+        if st.button("🚀 Start Infinite Typing", use_container_width=True):
+            st.session_state.typing_active = True
+    with type_col2:
+        if st.button("🛑 Stop Typing", use_container_width=True):
+            st.session_state.typing_active = False
+
+    if st.session_state.typing_active:
+        st.warning("Typing is currently ACTIVE. Keep this tab open or do not close the app.")
+        h = get_headers(token)
+        t_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
+        
+        # This will run as long as the page is viewed and typing_active is True
+        while st.session_state.typing_active:
+            res = requests.post(t_url, headers=h)
+            if res.status_code != 204:
+                st.error("Failed to send typing indicator. Check Channel ID/Token.")
+                st.session_state.typing_active = False
+                break
+            time.sleep(random.randint(5, 8))
+            st.rerun() # Refresh to check for stop button press
