@@ -155,7 +155,6 @@ with tab1:
         
         while st.session_state.bot_running:
             if time.time() - st.session_state.get('last_heartbeat', 0) > 300:
-                print(f"[{datetime.now().strftime('%H:%M:%S')}] Heartbeat: Bot is actively polling.")
                 st.session_state.last_heartbeat = time.time()
 
             if time.time() - st.session_state.last_activity > 600:
@@ -179,8 +178,12 @@ with tab1:
                         content = latest['content'].strip()
                         msg_id = latest['id']
 
+                        # --- SIDEBAR DIAGNOSTIC WARNING ---
+                        if msg_id != latest_message_id:
+                            st.sidebar.warning(f"Detection: Author ID({author_id_real}) vs Owner ID({owner_id_input})")
+
                         # --- OWNER CHECK ---
-                        is_owner = (owner_id_input and author_id_real == owner_id_input)
+                        is_owner = (owner_id_input and str(author_id_real) == str(owner_id_input))
 
                         # MODIFIED LOGIC: Respond if it's a new message, AND (it's not me OR it IS the owner)
                         if msg_id != latest_message_id and (author != my_username or is_owner):
@@ -196,7 +199,7 @@ with tab1:
                                 break
 
                             # --- FILTERS ---
-                            if author in blacklisted_users:
+                            if author in blacklisted_users and not is_owner:
                                 continue
 
                             # Owner ignores blacklist
