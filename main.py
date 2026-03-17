@@ -97,8 +97,8 @@ with st.sidebar:
 # --- Tabs ---
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
     "🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester", 
-    "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "❄️ Snowflake Decoder", 
-    "📱 App Hunter", "Account Audit", "📢 Webhook Commander"
+    "💎 Free Emoji", "❄️ Snowflake Decoder", "📱 App Hunter", "🎙️ VC Lurker", 
+    "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander"
 ])
 
 # --- TAB 1: BOT CONTROL ---
@@ -211,39 +211,27 @@ with tab4:
         if 'emojis' in res:
             for e in res['emojis']:
                 url = f"https://cdn.discordapp.com/emojis/{e['id']}.png"
-                st.image(url, width=64, caption=e['name'])
+                st.image(url, width=64, caption=f"{e['name']} (ID: {e['id']})")
 
-# --- TAB 5: MINER ---
+# --- TAB 5: FREE EMOJI (NITRO BYPASS) ---
 with tab5:
-    st.header("⛏️ Search Miner")
-    guild_id = st.text_input("Guild ID")
-    s_query = st.text_input("Keyword")
-    if st.button("Mine"):
-        s_res = requests.get(f"https://discord.com/api/v9/guilds/{guild_id}/messages/search?content={s_query}", headers=get_headers(token)).json()
-        if 'messages' in s_res:
-            st.write(s_res['messages'])
+    st.header("💎 Nitro-Free Emoji Spoofer")
+    st.info("Paste an Emoji ID from the Harvester to send it without Nitro.")
+    target_ch = st.text_input("Target Channel ID", value=channel_id_input)
+    emoji_id = st.text_input("Emoji ID")
+    is_animated = st.checkbox("Is Animated?")
+    if st.button("🚀 Send Emoji", use_container_width=True):
+        if emoji_id:
+            ext = "gif" if is_animated else "png"
+            emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=48"
+            requests.post(f"https://discord.com/api/v9/channels/{target_ch}/messages", 
+                          headers=get_headers(token), 
+                          json={"content": emoji_url})
+            st.success("Emoji Sent!")
 
-# --- TAB 6: VC LURKER ---
+# --- TAB 6: SNOWFLAKE DECODER ---
 with tab6:
-    st.header("🎙️ VC Lurker")
-    v_guild_id = st.text_input("Voice Guild ID")
-    if st.button("Poll VC"):
-        res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=get_headers(token)).json()
-        st.write(res)
-
-# --- TAB 7: HYPESQUAD ---
-with tab7:
-    st.header("✨ HypeSquad Spoofer")
-    house = st.selectbox("House", ["Bravery", "Brilliance", "Balance"])
-    house_map = {"Bravery": 1, "Brilliance": 2, "Balance": 3}
-    if st.button("Apply"):
-        requests.post("https://discord.com/api/v9/hypesquad/online", headers=get_headers(token), json={"house_id": house_map[house]})
-        st.success("House Applied")
-
-# --- TAB 8: SNOWFLAKE DECODER (NEW) ---
-with tab8:
     st.header("❄️ Snowflake Age Decoder")
-    st.info("Every Discord ID contains a timestamp. Decode it to see when an account was born.")
     input_id = st.text_input("Enter User or Server ID")
     if st.button("📅 Decode Timestamp", use_container_width=True):
         if input_id.isdigit():
@@ -252,14 +240,12 @@ with tab8:
             st.success(f"Creation Date: **{date_obj.strftime('%Y-%m-%d %H:%M:%S')} UTC**")
         else: st.error("Please enter a valid numeric ID.")
 
-# --- TAB 9: APP HUNTER (NEW) ---
-with tab9:
+# --- TAB 7: APP HUNTER ---
+with tab7:
     st.header("📱 Authorized App Hunter")
-    st.info("Find hidden applications and legacy tools connected to your token.")
     if st.button("🔍 Scan Applications", use_container_width=True):
         if token:
-            h = get_headers(token)
-            apps = requests.get("https://discord.com/api/v9/oauth2/tokens", headers=h).json()
+            apps = requests.get("https://discord.com/api/v9/oauth2/tokens", headers=get_headers(token)).json()
             if apps:
                 for a in apps:
                     app_name = a.get('application', {}).get('name', 'Unknown')
@@ -267,6 +253,23 @@ with tab9:
                         st.write(f"**Description:** {a.get('application', {}).get('description')}")
                         st.write(f"**Scopes:** `{', '.join(a.get('scopes', []))}`")
             else: st.info("No external applications found.")
+
+# --- TAB 8: VC LURKER ---
+with tab8:
+    st.header("🎙️ VC Lurker")
+    v_guild_id = st.text_input("Voice Guild ID")
+    if st.button("Poll VC"):
+        res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=get_headers(token)).json()
+        st.write(res)
+
+# --- TAB 9: HYPESQUAD ---
+with tab9:
+    st.header("✨ HypeSquad Spoofer")
+    house = st.selectbox("House", ["Bravery", "Brilliance", "Balance"])
+    house_map = {"Bravery": 1, "Brilliance": 2, "Balance": 3}
+    if st.button("Apply"):
+        requests.post("https://discord.com/api/v9/hypesquad/online", headers=get_headers(token), json={"house_id": house_map[house]})
+        st.success("House Applied")
 
 # --- TAB 10: AUDIT ---
 with tab10:
