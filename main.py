@@ -70,6 +70,14 @@ def add_reaction(channel_id, message_id, emoji, headers):
     url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
     requests.put(url, headers=headers)
 
+def safety_filter(text):
+    """Checks for toxic or harmful content before sending."""
+    harmful_terms = ["self-harm", "suicide", "kys", "kill yourself", "harming myself", "toxicity_placeholder"]
+    for term in harmful_terms:
+        if term in text.lower():
+            return False
+    return True
+
 # --- Sidebar ---
 with st.sidebar:
     st.header("🔑 Authentication")
@@ -142,6 +150,11 @@ with tab1:
         latest_message_id = None
         
         while st.session_state.bot_running:
+            # --- 10 MINUTE AUTO-RESTART CHECK ---
+            if time.time() - st.session_state.last_activity > 600:
+                st.session_state.last_activity = time.time()
+                st.rerun()
+
             try:
                 if os.path.isfile('discord_audit_log.csv'):
                     df_log = pd.read_csv('discord_audit_log.csv').tail(10)
@@ -170,18 +183,27 @@ with tab1:
                             is_allowed = (allowed_users == "everyone" or author in allowed_users)
                             if is_allowed and not any(w in content.lower() for w in blacklist):
                                 requests.post(typing_url, headers=headers)
+                                
+                                # --- CONTEXT FETCHING WITH MEMORY DEPTH ---
                                 chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
                                 context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
-                                for m in reversed(context_req):
-                                    role = "assistant" if m['author']['username'].lower() == my_username else "user"
-                                    chat_history.append({"role": role, "content": m['content']})
+                                
+                                if isinstance(context_req, list):
+                                    for m in reversed(context_req):
+                                        role = "assistant" if m['author']['username'].lower() == my_username else "user"
+                                        chat_history.append({"role": role, "content": m['content']})
 
                                 reply = client.chat.completions.create(model="openrouter/free", messages=chat_history).choices[0].message.content
-                                if reaction_delay > 0: time.sleep(reaction_delay)
                                 
-                                add_reaction(channel_id_input, msg_id, "💬", headers)
-                                jitter_delay(1.5, 3.5)
-                                requests.post(discord_url, json={"content": reply}, headers=headers)
+                                # --- SAFETY FILTER CHECK ---
+                                if safety_filter(reply):
+                                    if reaction_delay > 0: time.sleep(reaction_delay)
+                                    add_reaction(channel_id_input, msg_id, "💬", headers)
+                                    jitter_delay(1.5, 3.5)
+                                    requests.post(discord_url, json={"content": reply}, headers=headers)
+                                    log_to_csv(author, content, "Replied")
+                                else:
+                                    log_to_csv("SYSTEM", "Blocked harmful output", "Safety Filter")
                             
                             latest_message_id = msg_id
 
@@ -332,8 +354,6 @@ with tab13:
 # --- TAB 14: INFINITE TYPING ---
 with tab14:
     st.header("⏳ Infinite Typing Indicator")
-    st.info("Keeps the 'typing...' status active in the selected channel indefinitely.")
-    
     type_col1, type_col2 = st.columns(2)
     with type_col1:
         if st.button("🚀 Start Infinite Typing", use_container_width=True):
@@ -343,16 +363,12 @@ with tab14:
             st.session_state.typing_active = False
 
     if st.session_state.typing_active:
-        st.warning("Typing is currently ACTIVE. Keep this tab open or do not close the app.")
         h = get_headers(token)
         t_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
-        
-        # This will run as long as the page is viewed and typing_active is True
         while st.session_state.typing_active:
             res = requests.post(t_url, headers=h)
             if res.status_code != 204:
-                st.error("Failed to send typing indicator. Check Channel ID/Token.")
                 st.session_state.typing_active = False
                 break
             time.sleep(random.randint(5, 8))
-            st.rerun() # Refresh to check for stop button press
+            st.rerun()
