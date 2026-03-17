@@ -103,14 +103,10 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ Bot Settings")
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
-    
-    # --- SPEED TWEAKING ---
-    poll_speed = st.slider("Polling Frequency (Seconds)", 0.5, 10.0, 2.0, help="How often to check for new messages.")
-    resp_delay = st.slider("Response Delay (Seconds)", 0.0, 10.0, 0.5, help="Extra wait time before sending AI reply.")
-    
+    poll_speed = st.slider("Polling Frequency (Seconds)", 0.5, 10.0, 2.0)
+    resp_delay = st.slider("Response Delay (Seconds)", 0.0, 10.0, 0.5)
     reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=10, value=1)
-    
-    enable_safety = st.toggle("Enable Safety Filter", value=True, help="Block toxic/self-harm AI outputs")
+    enable_safety = st.toggle("Enable Safety Filter", value=True)
     
     emoji_pool_raw = st.text_input("Custom Emoji Pool", placeholder="🔥,💀,✅,🧠")
     emoji_pool = [e.strip() for e in emoji_pool_raw.split(",") if e.strip()]
@@ -121,7 +117,6 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13
     "💎 Free Emoji", "❄️ Snowflake Decoder", "📱 App Hunter", "🎙️ VC Lurker", 
     "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander", "👻 Message Ghoster", "🎨 Text Color", "⏳ Infinite Typing"
 ])
-
 
 # --- TAB 1: BOT CONTROL ---
 with tab1:
@@ -172,26 +167,31 @@ with tab1:
                     df_log = pd.read_csv('discord_audit_log.csv').tail(10)
                     log_display.table(df_log)
 
-                # Polling frequency check
                 time.sleep(poll_speed)
-                
                 r = requests.get(discord_url, headers=headers, timeout=10)
+                
                 if r.status_code == 200:
                     msgs = r.json()
                     if msgs and isinstance(msgs, list):
                         latest = msgs[0]
-                        author, content, msg_id = latest['author']['username'].lower(), latest['content'].strip(), latest['id']
+                        author = latest['author']['username'].lower()
+                        content = latest['content'].strip()
+                        msg_id = latest['id']
 
                         if msg_id != latest_message_id and author != my_username:
                             st.session_state.last_activity = time.time()
-                            
-                            if author == owner_name and content.lower() == "shutdown":
+                            latest_message_id = msg_id # Set this immediately to avoid double processing
+
+                            # --- CRITICAL: SHUTDOWN CHECK (PRIORITY 1) ---
+                            if owner_name and author == owner_name and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 Shutting down..."}, headers=headers)
+                                log_to_csv(author, content, "Owner Shutdown Triggered")
                                 st.session_state.bot_running = False
                                 st.rerun()
+                                break
 
+                            # --- OTHER FILTERS ---
                             if author in blacklisted_users:
-                                latest_message_id = msg_id
                                 continue
 
                             is_allowed = (allowed_users == "everyone" or author in allowed_users)
@@ -206,27 +206,23 @@ with tab1:
                                         role = "assistant" if m['author']['username'].lower() == my_username else "user"
                                         chat_history.append({"role": role, "content": m['content']})
 
-                                reply = client.chat.completions.create(model="openrouter/free", messages=chat_history).choices[0].message.content
+                                response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
+                                reply = response.choices[0].message.content
                                 
                                 if not enable_safety or safety_filter(reply):
                                     if reaction_delay > 0: time.sleep(reaction_delay)
                                     add_reaction(channel_id_input, msg_id, "💬", headers)
-                                    
-                                    # USER-CONTROLLED RESPONSE DELAY
                                     if resp_delay > 0: time.sleep(resp_delay)
-                                    
                                     requests.post(discord_url, json={"content": reply}, headers=headers)
                                     log_to_csv(author, content, "Replied")
                                 else:
                                     log_to_csv("SYSTEM", "Blocked harmful output", "Safety Filter")
-                            
-                            latest_message_id = msg_id
 
             except Exception as e:
                 time.sleep(5)
                 continue
 
-# --- TAB 2: SCRAPER ---
+# --- TAB 2 TO 14 REMAIN THE SAME AS PREVIOUS ---
 with tab2:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
@@ -236,14 +232,12 @@ with tab2:
         if res.status_code == 200:
             st.dataframe(pd.DataFrame([{"Author": m['author']['username'], "Content": m['content']} for m in res.json()]))
 
-# --- TAB 3: MEMORY ---
 with tab3:
     st.header("🧠 DM Memory")
     if st.button("Clear Cache"):
         st.session_state.processed_dms = set()
         st.success("Cleared.")
 
-# --- TAB 4: HARVESTER ---
 with tab4:
     st.header("🌾 Server Harvester")
     target_guild = st.text_input("Target Server ID")
@@ -254,7 +248,6 @@ with tab4:
                 url = f"https://cdn.discordapp.com/emojis/{e['id']}.png"
                 st.image(url, width=64, caption=f"{e['name']} (ID: {e['id']})")
 
-# --- TAB 5: FREE EMOJI (NITRO BYPASS) ---
 with tab5:
     st.header("💎 Nitro-Free Emoji Spoofer")
     target_ch = st.text_input("Target Channel ID", value=channel_id_input, key="emoji_ch")
@@ -264,12 +257,9 @@ with tab5:
         if emoji_id:
             ext = "gif" if is_animated else "png"
             emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=48"
-            requests.post(f"https://discord.com/api/v9/channels/{target_ch}/messages", 
-                          headers=get_headers(token), 
-                          json={"content": emoji_url})
+            requests.post(f"https://discord.com/api/v9/channels/{target_ch}/messages", headers=get_headers(token), json={"content": emoji_url})
             st.success("Emoji Sent!")
 
-# --- TAB 6: SNOWFLAKE DECODER ---
 with tab6:
     st.header("❄️ Snowflake Age Decoder")
     input_id = st.text_input("Enter User or Server ID")
@@ -280,7 +270,6 @@ with tab6:
             st.success(f"Creation Date: **{date_obj.strftime('%Y-%m-%d %H:%M:%S')} UTC**")
         else: st.error("Please enter a valid numeric ID.")
 
-# --- TAB 7: APP HUNTER ---
 with tab7:
     st.header("📱 Authorized App Hunter")
     if st.button("🔍 Scan Applications", use_container_width=True):
@@ -294,7 +283,6 @@ with tab7:
                         st.write(f"**Scopes:** `{', '.join(a.get('scopes', []))}`")
             else: st.info("No external applications found.")
 
-# --- TAB 8: VC LURKER ---
 with tab8:
     st.header("🎙️ VC Lurker")
     v_guild_id = st.text_input("Voice Guild ID")
@@ -302,7 +290,6 @@ with tab8:
         res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=get_headers(token)).json()
         st.write(res)
 
-# --- TAB 9: HYPESQUAD ---
 with tab9:
     st.header("✨ HypeSquad Spoofer")
     house = st.selectbox("House", ["Bravery", "Brilliance", "Balance"])
@@ -311,14 +298,12 @@ with tab9:
         requests.post("https://discord.com/api/v9/hypesquad/online", headers=get_headers(token), json={"house_id": house_map[house]})
         st.success("House Applied")
 
-# --- TAB 10: AUDIT ---
 with tab10:
     st.header("🔍 Account Auditor")
     if st.button("Run Audit"):
         u_res = requests.get("https://discord.com/api/v9/users/@me", headers=get_headers(token)).json()
         st.json(u_res)
 
-# --- TAB 11: WEBHOOK ---
 with tab11:
     st.header("📢 Webhook Commander")
     wh_url = st.text_input("Webhook URL")
@@ -327,13 +312,11 @@ with tab11:
         requests.post(wh_url, json={"content": wh_msg})
         st.success("Sent")
 
-# --- TAB 12: MESSAGE GHOSTER ---
 with tab12:
     st.header("👻 Message Ghoster")
     ghost_ch = st.text_input("Target Channel ID", value=channel_id_input, key="ghost_ch")
     ghost_limit = st.number_input("Scan Limit", min_value=1, max_value=500, value=50)
     ghost_keyword = st.text_input("Keyword Filter (Optional)")
-    
     if st.button("🔥 Purge My Messages", use_container_width=True):
         if my_id:
             h = get_headers(token)
@@ -344,28 +327,20 @@ with tab12:
                     if not ghost_keyword or ghost_keyword.lower() in m['content'].lower():
                         requests.delete(f"https://discord.com/api/v9/channels/{ghost_ch}/messages/{m['id']}", headers=h)
                         count += 1
-                        time.sleep(1.2) # Safety delay
+                        time.sleep(1.2)
             st.success(f"Ghosted {count} messages.")
 
-# --- TAB 13: TEXT COLOR PAINTER ---
 with tab13:
     st.header("🎨 ANSI Color Painter")
     color_text = st.text_input("Your Message")
     color_choice = st.selectbox("Color", ["Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"])
-    
-    color_codes = {
-        "Red": "31", "Green": "32", "Yellow": "33", "Blue": "34", "Magenta": "35", "Cyan": "36", "White": "37"
-    }
-    
+    color_codes = {"Red": "31", "Green": "32", "Yellow": "33", "Blue": "34", "Magenta": "35", "Cyan": "36", "White": "37"}
     if st.button("🖌️ Send Colored Text", use_container_width=True):
         code = color_codes[color_choice]
         ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
-        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", 
-                      headers=get_headers(token), 
-                      json={"content": ansi_payload})
+        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload})
         st.success("Colored Message Sent!")
 
-# --- TAB 14: INFINITE TYPING ---
 with tab14:
     st.header("⏳ Infinite Typing Indicator")
     type_col1, type_col2 = st.columns(2)
@@ -375,7 +350,6 @@ with tab14:
     with type_col2:
         if st.button("🛑 Stop Typing", use_container_width=True):
             st.session_state.typing_active = False
-
     if st.session_state.typing_active:
         h = get_headers(token)
         t_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
