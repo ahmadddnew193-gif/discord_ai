@@ -123,9 +123,9 @@ with tab1:
     col1, col2 = st.columns(2)
     with col1:
         system_prompt = st.text_area("System Prompt", value="You are a helpful assistant.")
+        owner_id_input = st.text_input("Owner Discord ID").strip()
     with col2:
         blacklist_input = st.text_area("Blacklisted Keywords", placeholder="spam, help")
-        owner_name = st.text_input("Owner Username").strip().lower()
         allowed_input = st.text_input("Allowed Users", value="everyone")
         blacklisted_users_input = st.text_input("Blacklisted Users", placeholder="annoying_user1, troll_user2")
 
@@ -175,27 +175,35 @@ with tab1:
                     if msgs and isinstance(msgs, list):
                         latest = msgs[0]
                         author = latest['author']['username'].lower()
+                        author_id_real = latest['author']['id']
                         content = latest['content'].strip()
                         msg_id = latest['id']
 
                         if msg_id != latest_message_id and author != my_username:
                             st.session_state.last_activity = time.time()
-                            latest_message_id = msg_id # Set this immediately to avoid double processing
+                            latest_message_id = msg_id 
 
-                            # --- CRITICAL: SHUTDOWN CHECK (PRIORITY 1) ---
-                            if owner_name and author == owner_name and content.lower() == "shutdown":
-                                requests.post(discord_url, json={"content": "🛑 Shutting down..."}, headers=headers)
+                            # --- OWNER CHECK ---
+                            is_owner = (owner_id_input and author_id_real == owner_id_input)
+
+                            # --- SHUTDOWN CHECK ---
+                            if is_owner and content.lower() == "shutdown":
+                                requests.post(discord_url, json={"content": "🛑 Owner recognized. Shutting down..."}, headers=headers)
                                 log_to_csv(author, content, "Owner Shutdown Triggered")
                                 st.session_state.bot_running = False
                                 st.rerun()
                                 break
 
-                            # --- OTHER FILTERS ---
+                            # --- FILTERS ---
                             if author in blacklisted_users:
                                 continue
 
-                            is_allowed = (allowed_users == "everyone" or author in allowed_users)
-                            if is_allowed and not any(w in content.lower() for w in blacklist):
+                            # Owner ignores blacklist
+                            skip_filters = False if is_owner else any(w in content.lower() for w in blacklist)
+                            
+                            is_allowed = (allowed_users == "everyone" or author in allowed_users or is_owner)
+                            
+                            if is_allowed and not skip_filters:
                                 requests.post(typing_url, headers=headers)
                                 
                                 chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
@@ -210,11 +218,17 @@ with tab1:
                                 reply = response.choices[0].message.content
                                 
                                 if not enable_safety or safety_filter(reply):
+                                    # Owner Perk: Unique Reaction
+                                    reaction_emoji = "👑" if is_owner else "💬"
                                     if reaction_delay > 0: time.sleep(reaction_delay)
-                                    add_reaction(channel_id_input, msg_id, "💬", headers)
-                                    if resp_delay > 0: time.sleep(resp_delay)
+                                    add_reaction(channel_id_input, msg_id, reaction_emoji, headers)
+                                    
+                                    # Owner Perk: Instant Response
+                                    final_delay = 0 if is_owner else resp_delay
+                                    if final_delay > 0: time.sleep(final_delay)
+                                    
                                     requests.post(discord_url, json={"content": reply}, headers=headers)
-                                    log_to_csv(author, content, "Replied")
+                                    log_to_csv(author, content, "Replied (Owner Mode)" if is_owner else "Replied")
                                 else:
                                     log_to_csv("SYSTEM", "Blocked harmful output", "Safety Filter")
 
@@ -222,7 +236,7 @@ with tab1:
                 time.sleep(5)
                 continue
 
-# --- TAB 2 TO 14 REMAIN THE SAME AS PREVIOUS ---
+# --- TABS 2-14 REMAIN UNCHANGED ---
 with tab2:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
