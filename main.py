@@ -100,7 +100,7 @@ with st.sidebar:
     auto_restart = st.toggle("Auto-Restart (10min Idle)", value=True)
 
 # --- Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🎭 Chameleon", "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "🌈 Profile Glitcher","Account Audit","Custom Prescense"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester", "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "🌈 Profile Glitcher","Account Audit","📢 Webhook Commander"])
 
 # --- TAB 1: BOT CONTROL ---
 with tab1:
@@ -261,30 +261,37 @@ with tab3:
         st.session_state.processed_dms = set()
         st.success("DM Memory cleared.")
 
-# --- TAB 4: CHAMELEON (SAFE MODE) ---
+# --- TAB 4: SERVER DATA HARVESTER (SAFE) ---
 with tab4:
-    st.header("🎭 Identity Chameleon (Safe Mode)")
-    st.warning("⚠️ Warning: Frequent avatar changes can lead to phone verification locks.")
-    target_id = st.text_input("Target User ID to Mimic")
+    st.header("🌾 Server Data Harvester")
+    st.info("Extract emojis and icons from any server you are in. This is a safe 'Read' action.")
+    target_guild = st.text_input("Server ID to Harvest")
     
-    if st.button("Activate Mimicry", use_container_width=True):
-        if token and target_id:
-            jitter_delay(3.0, 7.0) # Longer jitter for high-risk action
-            h = get_headers(token)
-            
-            u_data = requests.get(f"https://discord.com/api/v9/users/{target_id}", headers=h).json()
-            if 'avatar' in u_data and u_data['avatar']:
-                a_url = f"https://cdn.discordapp.com/avatars/{target_id}/{u_data['avatar']}.png?size=1024"
-                response = requests.get(a_url)
-                if response.status_code == 200:
-                    img_b64 = base64.b64encode(response.content).decode('utf-8')
-                    jitter_delay(2.0, 4.0)
-                    patch_res = requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"avatar": f"data:image/png;base64,{img_b64}"})
-                    
-                    if patch_res.status_code == 200:
-                        st.success("Avatar copied! Wait 60s before doing this again.")
-                    else:
-                        st.error("Discord is rate limiting your profile changes.")
+    col_em, col_ic = st.columns(2)
+    with col_em:
+        if st.button("📥 Extract Emojis", use_container_width=True):
+            if token and target_guild:
+                h = get_headers(token)
+                jitter_delay(1.0, 2.0)
+                res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild}", headers=h).json()
+                if 'emojis' in res:
+                    for e in res['emojis']:
+                        ext = "gif" if e['animated'] else "png"
+                        url = f"https://cdn.discordapp.com/emojis/{e['id']}.{ext}"
+                        st.write(f"**{e['name']}**")
+                        st.image(url, width=64)
+                        st.caption(f"[Download Link]({url})")
+                else: st.error("Could not find emojis. Make sure the ID is correct.")
+
+    with col_ic:
+        if st.button("🖼️ Get Server Icon", use_container_width=True):
+            if token and target_guild:
+                h = get_headers(token)
+                res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild}", headers=h).json()
+                if 'icon' in res and res['icon']:
+                    icon_url = f"https://cdn.discordapp.com/icons/{target_guild}/{res['icon']}.png?size=1024"
+                    st.image(icon_url, caption="Server Icon")
+                    st.download_button("Download Icon", requests.get(icon_url).content, "icon.png")
 
 # --- TAB 5: SEARCH MINER ---
 with tab5:
@@ -311,7 +318,7 @@ with tab6:
             v_res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=h).json()
             st.write(v_res)
 
-# --- TAB 7: HYPESQUAD SPOOFER (FIXED) ---
+# --- TAB 7: HYPESQUAD SPOOFER ---
 with tab7:
     st.header("✨ HypeSquad Spoofer")
     house = st.selectbox("Select House", ["Bravery", "Brilliance", "Balance"])
@@ -324,10 +331,10 @@ with tab7:
             if r.status_code == 204: st.success(f"Now a member of {house}!")
             else: st.error(f"Error: {r.text}")
 
-# --- TAB 8: PROFILE GLITCHER (FIXED) ---
+# --- TAB 8: PROFILE GLITCHER ---
 with tab8:
     st.header("🌈 Profile Theme & Pronoun Glitcher")
-    st.info("Directly edit profile metadata fields. Changes may take a minute to propagate to your client.")
+    st.info("Directly edit profile metadata fields. Changes may take a minute to propagate.")
     
     col_x, col_y = st.columns(2)
     with col_x:
@@ -349,75 +356,41 @@ with tab8:
             if res.status_code == 200: st.success("Theme Color Applied!")
             else: st.error(f"Error: {res.text}")
 
-
-
-# --- TAB 9: ACCOUNT AUDITOR (SECURITY & METADATA) ---
+# --- TAB 9: ACCOUNT AUDITOR ---
 with tab9:
     st.header("🔍 Deep Account Auditor")
-    st.info("This tool scans your account's internal metadata for security flags and hidden connections.")
-    
     if st.button("🚀 Run Full Audit", use_container_width=True):
-        if not token:
-            st.error("Please enter a token in the sidebar first.")
-        else:
+        if token:
             h = get_headers(token)
-            
-            # 1. User Flags & Security Status
             with st.status("Analyzing Account Flags...", expanded=True) as status:
                 jitter_delay(1.0, 2.0)
                 u_res = requests.get("https://discord.com/api/v9/users/@me", headers=h).json()
-                
                 col_a, col_b = st.columns(2)
                 with col_a:
                     st.metric("Username", u_res.get('username'))
                     st.metric("2FA Enabled", "✅ Yes" if u_res.get('mfa_enabled') else "❌ No")
                 with col_b:
                     st.metric("Public Flags", u_res.get('public_flags', 0))
-                    st.write("**Account Creation:**", datetime.fromtimestamp(((int(u_res['id']) >> 22) + 1420070400000) / 1000).strftime('%Y-%m-%d'))
-
-                # 2. Authorized Applications (OAuth2)
+                
                 st.write("---")
                 st.subheader("🔗 Authorized Applications")
-                jitter_delay(1.5, 3.0)
                 auth_apps = requests.get("https://discord.com/api/v9/oauth2/tokens", headers=h).json()
-                
                 if auth_apps:
-                    app_data = []
-                    for app in auth_apps:
-                        app_info = app.get('application', {})
-                        app_data.append({
-                            "App Name": app_info.get('name'),
-                            "Description": app_info.get('description', 'No description'),
-                            "Scopes": ", ".join(app.get('scopes', []))
-                        })
-                    st.table(pd.DataFrame(app_data))
-                else:
-                    st.write("No third-party apps found.")
-
-                # 3. Hidden Connections (Spotify, Xbox, etc.)
-                st.write("---")
-                st.subheader("📡 Linked Connections")
-                jitter_delay(1.0, 2.5)
-                conn_res = requests.get("https://discord.com/api/v9/users/@me/connections", headers=h).json()
-                
-                if conn_res:
-                    for conn in conn_res:
-                        st.write(f"- **{conn['type'].title()}**: `{conn['name']}` (Verified: {conn['verified']})")
-                else:
-                    st.write("No external accounts linked.")
+                    st.table(pd.DataFrame([{"Name": a.get('application', {}).get('name'), "Scopes": ", ".join(a.get('scopes', []))} for a in auth_apps]))
                 
                 status.update(label="Audit Complete!", state="complete", expanded=False)
 
-# --- TAB 10: RICH PRESENCE (THE SPOOFER) ---
+# --- TAB 10: WEBHOOK COMMANDER (SAFE) ---
 with tab10:
-    st.header("🎮 Custom Rich Presence")
-    st.write("Make it look like you are playing any game you want.")
+    st.header("📢 Webhook Commander")
+    st.info("Send messages as a customized webhook. This uses NO account tokens and is 100% safe.")
+    wh_url = st.text_input("Webhook URL")
+    wh_name = st.text_input("Custom Display Name", placeholder="System Admin")
+    wh_msg = st.text_area("Message Content")
     
-    game_name = st.text_input("Game Name", placeholder="Grand Theft Auto VI")
-    game_details = st.text_input("Details", placeholder="Exploring Vice City")
-    
-    if st.button("Broadcast Status", use_container_width=True):
-        st.warning("Note: Custom RPC usually requires a Gateway connection. This will attempt a REST broadcast (Experimental).")
-        # In a real bot, you'd use a websocket here, but we can log the intent.
-        log_to_csv(my_username, game_name, "RPC SPOOF ATTEMPT")
-        st.info(f"Broadcast request for '{game_name}' sent to logs.")
+    if st.button("🚀 Fire Webhook", use_container_width=True):
+        if wh_url and wh_msg:
+            payload = {"content": wh_msg, "username": wh_name}
+            r = requests.post(wh_url, json=payload)
+            if r.status_code < 300: st.success("Message Sent via Webhook!")
+            else: st.error(f"Failed: {r.text}")
