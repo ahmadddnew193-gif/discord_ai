@@ -179,12 +179,13 @@ with tab1:
                         content = latest['content'].strip()
                         msg_id = latest['id']
 
-                        if msg_id != latest_message_id and author != my_username:
+                        # --- OWNER CHECK ---
+                        is_owner = (owner_id_input and author_id_real == owner_id_input)
+
+                        # MODIFIED LOGIC: Respond if it's a new message, AND (it's not me OR it IS the owner)
+                        if msg_id != latest_message_id and (author != my_username or is_owner):
                             st.session_state.last_activity = time.time()
                             latest_message_id = msg_id 
-
-                            # --- OWNER CHECK ---
-                            is_owner = (owner_id_input and author_id_real == owner_id_input)
 
                             # --- SHUTDOWN CHECK ---
                             if is_owner and content.lower() == "shutdown":
