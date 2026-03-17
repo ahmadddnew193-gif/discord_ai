@@ -152,9 +152,9 @@ with tab1:
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
         
-        # Initialize latest_message_id with the current most recent message to avoid responding to old stuff on boot
-        init_req = requests.get(discord_url, headers=headers)
-        latest_message_id = init_req.json()[0]['id'] if init_req.status_code == 200 and init_req.json() else None
+        # Capture current state to avoid responding to history
+        init_r = requests.get(discord_url, headers=headers)
+        latest_message_id = init_r.json()[0]['id'] if init_r.status_code == 200 and init_r.json() else None
         
         while st.session_state.bot_running:
             if time.time() - st.session_state.get('last_heartbeat', 0) > 300:
@@ -185,24 +185,25 @@ with tab1:
                         if msg_id != latest_message_id:
                             st.sidebar.warning(f"Detection: Author ID({author_id_real}) vs Owner ID({owner_id_input})")
 
-                        # --- OWNER CHECK ---
                         is_owner = (owner_id_input and author_id_real == str(owner_id_input))
 
-                        # LOGIC: Respond if new message AND (it's not me)
-                        # Exception: If I am the owner, don't reply to my own "shutdown" or regular msgs to avoid loops.
-                        if msg_id != latest_message_id and author_id_real != str(my_id):
-                            st.session_state.last_activity = time.time()
-                            latest_message_id = msg_id 
-
-                            # --- SHUTDOWN CHECK ---
+                        # --- CORE LOGIC: NEW MESSAGE ONLY ---
+                        if msg_id != latest_message_id:
+                            
+                            # 1. IMMEDIATE SHUTDOWN (Owner only)
                             if is_owner and content.lower() == "shutdown":
-                                requests.post(discord_url, json={"content": "🛑 Owner recognized. Shutting down system..."}, headers=headers)
-                                log_to_csv(author_username, content, "Owner Shutdown Triggered")
+                                requests.post(discord_url, json={"content": "🛑 System Terminated by Owner."}, headers=headers)
+                                log_to_csv(author_username, content, "Shutdown Successful")
                                 st.session_state.bot_running = False
                                 st.rerun()
                                 break
 
-                            # --- FILTERS ---
+                            # 2. TRIGGER LOGIC:
+                            # We update the latest_message_id immediately so we don't double-process
+                            latest_message_id = msg_id 
+                            st.session_state.last_activity = time.time()
+
+                            # If it's a blacklisted user (and NOT the owner), skip
                             if author_username in blacklisted_users and not is_owner:
                                 continue
 
@@ -212,26 +213,35 @@ with tab1:
                             if is_allowed and not skip_filters:
                                 requests.post(typing_url, headers=headers)
                                 
+                                # Prep Memory
                                 chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
                                 context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
                                 
                                 if isinstance(context_req, list):
                                     for m in reversed(context_req):
+                                        # Distinguish between Bot and User for AI context
                                         role = "assistant" if str(m['author']['id']) == str(my_id) else "user"
                                         chat_history.append({"role": role, "content": m['content']})
 
+                                # Get AI Response
                                 response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
                                 reply = response.choices[0].message.content
                                 
                                 if not enable_safety or safety_filter(reply):
+                                    # Reaction
                                     reaction_emoji = "👑" if is_owner else "💬"
                                     if reaction_delay > 0: time.sleep(reaction_delay)
                                     add_reaction(channel_id_input, msg_id, reaction_emoji, headers)
                                     
-                                    final_delay = 0 if is_owner else resp_delay
-                                    if final_delay > 0: time.sleep(final_delay)
+                                    # Reply
+                                    if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
                                     
-                                    requests.post(discord_url, json={"content": reply}, headers=headers)
+                                    send_res = requests.post(discord_url, json={"content": reply}, headers=headers)
+                                    
+                                    # CRITICAL: If owner is self, update ID to the bot's own reply ID immediately
+                                    if send_res.status_code == 200:
+                                        latest_message_id = send_res.json()['id']
+                                    
                                     log_to_csv(author_username, content, "Replied (Owner Mode)" if is_owner else "Replied")
                                 else:
                                     log_to_csv("SYSTEM", "Blocked harmful output", "Safety Filter")
