@@ -8,6 +8,10 @@ from datetime import datetime
 import random
 import pandas as pd
 import base64
+from concurrent.futures import ThreadPoolExecutor
+
+# Initialize background worker
+executor = ThreadPoolExecutor(max_workers=5)
 
 st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
 st.title("Discord AI Bot & History Scraper")
@@ -77,6 +81,39 @@ def safety_filter(text):
             return False
     return True
 
+def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay):
+    """Handles AI logic in a separate thread to prevent blocking."""
+    try:
+        author_username = latest['author']['username'].lower()
+        content = latest['content'].strip()
+        msg_id = latest['id']
+        is_owner = str(latest['author']['id']) == str(owner_id_input)
+
+        # 1. Feedback
+        requests.post(typing_url, headers=headers)
+        reaction_emoji = "👑" if is_owner else "💬"
+        if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
+        add_reaction(channel_id_input, msg_id, reaction_emoji, headers)
+
+        # 2. Context
+        chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
+        context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
+        if isinstance(context_req, list):
+            for m in reversed(context_req):
+                role = "assistant" if str(m['author']['id']) == str(my_id) else "user"
+                chat_history.append({"role": role, "content": m['content']})
+
+        # 3. AI
+        response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
+        reply = response.choices[0].message.content
+        
+        if not enable_safety or safety_filter(reply):
+            if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
+            requests.post(discord_url, json={"content": reply}, headers=headers)
+            log_to_csv(author_username, content, "Threaded Reply")
+    except:
+        pass
+
 # --- Sidebar ---
 with st.sidebar:
     st.header("🔑 Authentication")
@@ -102,7 +139,6 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ Bot Settings")
     
-    # NEW: Status Indicator Added Here
     if st.session_state.bot_running:
         st.markdown("### 📡 Connection Status")
         status_box = st.empty()
@@ -186,7 +222,6 @@ with tab1:
                         # --- PROCESS NEW MESSAGE ---
                         if msg_id != latest_message_id:
                             status_box.warning("Status: ⚡ Triggered!")
-                            # Immediate ID update to prevent double-processing
                             latest_message_id = msg_id 
                             st.session_state.last_activity = time.time()
 
@@ -198,7 +233,7 @@ with tab1:
                                 st.rerun()
                                 break
 
-                            # 2. FILTER & REPLY
+                            # 2. FILTER & ASYNC REPLY
                             if author_username in blacklisted_users and not is_owner:
                                 continue
 
@@ -206,42 +241,11 @@ with tab1:
                             is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
                             
                             if is_allowed and not skip_filters:
-                                status_box.warning("Status: 🧠 Thinking...")
-                                # Start typing immediately
-                                requests.post(typing_url, headers=headers)
-                                
-                                # Fast context fetch
-                                chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
-                                context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
-                                
-                                if isinstance(context_req, list):
-                                    for m in reversed(context_req):
-                                        role = "assistant" if str(m['author']['id']) == str(my_id) else "user"
-                                        chat_history.append({"role": role, "content": m['content']})
-
-                                # Request AI response
-                                response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
-                                reply = response.choices[0].message.content
-                                
-                                if not enable_safety or safety_filter(reply):
-                                    status_box.success("Status: ✍️ Replying...")
-                                    # Instant Reaction
-                                    reaction_emoji = "👑" if is_owner else "💬"
-                                    if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
-                                    add_reaction(channel_id_input, msg_id, reaction_emoji, headers)
-                                    
-                                    # Instant Reply
-                                    if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
-                                    send_res = requests.post(discord_url, json={"content": reply}, headers=headers)
-                                    
-                                    # Sync ID if self-messaging
-                                    if send_res.status_code == 200:
-                                        latest_message_id = send_res.json()['id']
-                                    
-                                    log_to_csv(author_username, content, "Replied")
+                                status_box.warning("Status: 🧠 Background Processing...")
+                                # OFF-LOAD TO THREAD: This keeps the loop running!
+                                executor.submit(background_reply, latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay)
 
                 status_box.info("Status: 🟢 Running / Idle")
-                # Sleep only AFTER processing
                 time.sleep(poll_speed)
 
             except Exception as e:
