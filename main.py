@@ -78,10 +78,14 @@ with st.sidebar:
         if is_valid:
             st.success(f"✅ Verified: {user_info['username']}")
             my_username = user_info['username'].lower()
+            my_id = user_info['id']
         else:
             st.error("❌ Invalid Token")
             my_username = None
-    else: my_username = None
+            my_id = None
+    else: 
+        my_username = None
+        my_id = None
 
     or_key = st.text_input("OpenRouter API Key", type="password")
     channel_id_input = st.text_input("Channel ID")
@@ -95,10 +99,10 @@ with st.sidebar:
     emoji_pool = [e.strip() for e in emoji_pool_raw.split(",") if e.strip()]
 
 # --- Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13 = st.tabs([
     "🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester", 
     "💎 Free Emoji", "❄️ Snowflake Decoder", "📱 App Hunter", "🎙️ VC Lurker", 
-    "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander"
+    "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander", "👻 Message Ghoster", "🎨 Text Color"
 ])
 
 # --- TAB 1: BOT CONTROL ---
@@ -133,7 +137,6 @@ with tab1:
         headers = get_headers(token)
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
-        dm_channels_url = "https://discord.com/api/v9/users/@me/channels"
         latest_message_id = None
         
         while st.session_state.bot_running:
@@ -216,8 +219,7 @@ with tab4:
 # --- TAB 5: FREE EMOJI (NITRO BYPASS) ---
 with tab5:
     st.header("💎 Nitro-Free Emoji Spoofer")
-    st.info("Paste an Emoji ID from the Harvester to send it without Nitro.")
-    target_ch = st.text_input("Target Channel ID", value=channel_id_input)
+    target_ch = st.text_input("Target Channel ID", value=channel_id_input, key="emoji_ch")
     emoji_id = st.text_input("Emoji ID")
     is_animated = st.checkbox("Is Animated?")
     if st.button("🚀 Send Emoji", use_container_width=True):
@@ -286,3 +288,42 @@ with tab11:
     if st.button("Fire"):
         requests.post(wh_url, json={"content": wh_msg})
         st.success("Sent")
+
+# --- TAB 12: MESSAGE GHOSTER ---
+with tab12:
+    st.header("👻 Message Ghoster")
+    ghost_ch = st.text_input("Target Channel ID", value=channel_id_input, key="ghost_ch")
+    ghost_limit = st.number_input("Scan Limit", min_value=1, max_value=500, value=50)
+    ghost_keyword = st.text_input("Keyword Filter (Optional)")
+    
+    if st.button("🔥 Purge My Messages", use_container_width=True):
+        if my_id:
+            h = get_headers(token)
+            msgs = requests.get(f"https://discord.com/api/v9/channels/{ghost_ch}/messages?limit={ghost_limit}", headers=h).json()
+            count = 0
+            for m in msgs:
+                if m['author']['id'] == my_id:
+                    if not ghost_keyword or ghost_keyword.lower() in m['content'].lower():
+                        requests.delete(f"https://discord.com/api/v9/channels/{ghost_ch}/messages/{m['id']}", headers=h)
+                        count += 1
+                        time.sleep(1.2) # Safety delay
+            st.success(f"Ghosted {count} messages.")
+
+# --- TAB 13: TEXT COLOR PAINTER ---
+with tab13:
+    st.header("🎨 ANSI Color Painter")
+    color_text = st.text_input("Your Message")
+    color_choice = st.selectbox("Color", ["Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"])
+    
+    color_codes = {
+        "Red": "31", "Green": "32", "Yellow": "33", "Blue": "34", "Magenta": "35", "Cyan": "36", "White": "37"
+    }
+    
+    if st.button("🖌️ Send Colored Text", use_container_width=True):
+        code = color_codes[color_choice]
+        # Discord ANSI format: ```ansi\n[ESC][{code}m{text}```
+        ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
+        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", 
+                      headers=get_headers(token), 
+                      json={"content": ansi_payload})
+        st.success("Colored Message Sent!")
