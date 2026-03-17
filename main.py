@@ -105,7 +105,6 @@ with st.sidebar:
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
     reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=10, value=2)
     
-    # New Filter Toggle
     enable_safety = st.toggle("Enable Safety Filter", value=True, help="Block toxic/self-harm AI outputs")
     
     emoji_pool_raw = st.text_input("Custom Emoji Pool", placeholder="🔥,💀,✅,🧠")
@@ -140,7 +139,7 @@ with tab1:
         if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
             st.session_state.bot_running = True
             st.session_state.last_activity = time.time()
-            st.session_state.last_heartbeat = time.time() # Initialize heartbeat
+            st.session_state.last_heartbeat = time.time()
     with c2:
         if st.button("🛑 Stop Bot", use_container_width=True):
             st.session_state.bot_running = False
@@ -155,12 +154,10 @@ with tab1:
         latest_message_id = None
         
         while st.session_state.bot_running:
-            # --- HEARTBEAT LOG (Every 5 mins) ---
             if time.time() - st.session_state.get('last_heartbeat', 0) > 300:
                 print(f"[{datetime.now().strftime('%H:%M:%S')}] Heartbeat: Bot is actively polling.")
                 st.session_state.last_heartbeat = time.time()
 
-            # --- AUTO-RESTART / RERUN LOGIC ---
             if time.time() - st.session_state.last_activity > 600:
                 st.session_state.last_activity = time.time()
                 st.rerun()
@@ -181,8 +178,9 @@ with tab1:
                         if msg_id != latest_message_id and author != my_username:
                             st.session_state.last_activity = time.time()
                             
+                            # --- OWNER SHUTDOWN FEATURE ---
                             if author == owner_name and content.lower() == "shutdown":
-                                requests.post(discord_url, json={"content": "🛑 Offline."}, headers=headers)
+                                requests.post(discord_url, json={"content": "🛑 Shutting down..."}, headers=headers)
                                 st.session_state.bot_running = False
                                 st.rerun()
 
@@ -194,7 +192,6 @@ with tab1:
                             if is_allowed and not any(w in content.lower() for w in blacklist):
                                 requests.post(typing_url, headers=headers)
                                 
-                                # --- CONTEXT FETCHING WITH MEMORY DEPTH ---
                                 chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
                                 context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
                                 
