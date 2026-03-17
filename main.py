@@ -100,7 +100,11 @@ with st.sidebar:
     auto_restart = st.toggle("Auto-Restart (10min Idle)", value=True)
 
 # --- Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester", "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "🌈 Profile Glitcher","Account Audit","📢 Webhook Commander"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13 = st.tabs([
+    "🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester", 
+    "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "🌈 Profile Glitcher",
+    "🛡️ Session Guard", "🧪 Token Entropy", "💎 Orb Spoofer", "Account Audit", "📢 Webhook Commander"
+])
 
 # --- TAB 1: BOT CONTROL ---
 with tab1:
@@ -356,8 +360,69 @@ with tab8:
             if res.status_code == 200: st.success("Theme Color Applied!")
             else: st.error(f"Error: {res.text}")
 
-# --- TAB 9: ACCOUNT AUDITOR ---
+# --- TAB 9: SESSION GUARD (NEW) ---
 with tab9:
+    st.header("🛡️ Session Guard (Nuke)")
+    st.info("Monitor and manage active logins. If you see an unknown IP, reset your password immediately.")
+    if st.button("🔍 Scan Active Sessions", use_container_width=True):
+        if token:
+            h = get_headers(token)
+            jitter_delay(1.0, 2.0)
+            res = requests.get("https://discord.com/api/v9/users/@me/sessions", headers=h)
+            if res.status_code == 200:
+                sessions = res.json()
+                for s in sessions:
+                    with st.expander(f"💻 {s.get('client_info', {}).get('os')} - {s.get('client_info', {}).get('client')}"):
+                        st.write(f"**IP Address:** `{s.get('ip_addr')}`")
+                        st.write(f"**Location:** {s.get('city')}, {s.get('country_name')}")
+                        st.write(f"**Session ID:** `{s.get('session_id')}`")
+                        if s.get('approx_last_used_time'):
+                            st.write(f"**Last Used:** {s.get('approx_last_used_time')}")
+            else: st.error("Failed to fetch sessions. This endpoint might be restricted.")
+
+# --- TAB 10: TOKEN ENTROPY (NEW) ---
+with tab10:
+    st.header("🧪 Token Entropy & Flags")
+    st.info("Check your account's 'Internal Heat' and Shadowban status.")
+    if st.button("🚀 Analyze Token Flags", use_container_width=True):
+        if token:
+            h = get_headers(token)
+            jitter_delay(1.0, 2.0)
+            u_res = requests.get("https://discord.com/api/v9/users/@me", headers=h).json()
+            flags = u_res.get('flags', 0)
+            st.metric("Raw Flag Value", flags)
+            
+            if flags == 0: st.success("Account Health: Clean")
+            elif flags >= 1048576: st.warning("Flag detected: Potential Spam/Botting flag.")
+            
+            st.write("---")
+            st.subheader("📡 Connection Stability")
+            latency = requests.get("https://discord.com/api/v9/gateway").elapsed.total_seconds()
+            st.write(f"API Latency: `{latency}s`")
+            if latency > 1.0: st.error("High Latency: Your token is under heavy load or ratelimits.")
+
+# --- TAB 11: ORB QUEST SPOOFER (NEW) ---
+with tab11:
+    st.header("💎 Orb Quest Spoofer")
+    st.info("View hidden Quests and grab IDs for the Heartbeat Bypass.")
+    if st.button("🛰️ Scan for Orb Quests", use_container_width=True):
+        if token:
+            h = get_headers(token)
+            jitter_delay(1.0, 2.0)
+            res = requests.get("https://discord.com/api/v9/users/@me/quests", headers=h)
+            if res.status_code == 200:
+                quests = res.json().get('quests', [])
+                if quests:
+                    for q in quests:
+                        st.subheader(f"🎁 {q['config']['messages']['game_title']}")
+                        st.write(f"**Quest ID:** `{q['id']}`")
+                        st.write(f"**Reward:** {q['config']['messages']['reward_title']}")
+                        st.progress(q.get('progress', 0) / 100)
+                else: st.info("No active quests found. Check the Discovery tab.")
+            else: st.error("Quest API Error. Are you using a verified account?")
+
+# --- TAB 12: ACCOUNT AUDITOR ---
+with tab12:
     st.header("🔍 Deep Account Auditor")
     if st.button("🚀 Run Full Audit", use_container_width=True):
         if token:
@@ -380,8 +445,8 @@ with tab9:
                 
                 status.update(label="Audit Complete!", state="complete", expanded=False)
 
-# --- TAB 10: WEBHOOK COMMANDER (SAFE) ---
-with tab10:
+# --- TAB 13: WEBHOOK COMMANDER (SAFE) ---
+with tab13:
     st.header("📢 Webhook Commander")
     st.info("Send messages as a customized webhook. This uses NO account tokens and is 100% safe.")
     wh_url = st.text_input("Webhook URL")
