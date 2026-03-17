@@ -105,6 +105,9 @@ with st.sidebar:
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
     reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=10, value=2)
     
+    # New Filter Toggle
+    enable_safety = st.toggle("Enable Safety Filter", value=True, help="Block toxic/self-harm AI outputs")
+    
     emoji_pool_raw = st.text_input("Custom Emoji Pool", placeholder="🔥,💀,✅,🧠")
     emoji_pool = [e.strip() for e in emoji_pool_raw.split(",") if e.strip()]
 
@@ -150,7 +153,7 @@ with tab1:
         latest_message_id = None
         
         while st.session_state.bot_running:
-            # --- 10 MINUTE AUTO-RESTART CHECK ---
+            # --- AUTO-RESTART / RERUN LOGIC ---
             if time.time() - st.session_state.last_activity > 600:
                 st.session_state.last_activity = time.time()
                 st.rerun()
@@ -196,7 +199,8 @@ with tab1:
                                 reply = client.chat.completions.create(model="openrouter/free", messages=chat_history).choices[0].message.content
                                 
                                 # --- SAFETY FILTER CHECK ---
-                                if safety_filter(reply):
+                                # Logic: If filter is enabled and text is harmful, block it. Otherwise, proceed.
+                                if not enable_safety or safety_filter(reply):
                                     if reaction_delay > 0: time.sleep(reaction_delay)
                                     add_reaction(channel_id_input, msg_id, "💬", headers)
                                     jitter_delay(1.5, 3.5)
