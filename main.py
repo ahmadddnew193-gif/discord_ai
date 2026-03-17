@@ -101,6 +101,13 @@ with st.sidebar:
     
     st.divider()
     st.header("⚙️ Bot Settings")
+    
+    # NEW: Status Indicator Added Here
+    if st.session_state.bot_running:
+        st.markdown("### 📡 Connection Status")
+        status_box = st.empty()
+        status_box.info("Status: 🟢 Running / Idle")
+    
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
     poll_speed = st.slider("Polling Frequency (Seconds)", 0.1, 5.0, 1.0)
     resp_delay = st.slider("Response Delay (Seconds)", 0.0, 5.0, 0.0)
@@ -139,9 +146,11 @@ with tab1:
             st.session_state.bot_running = True
             st.session_state.last_activity = time.time()
             st.session_state.last_heartbeat = time.time()
+            st.rerun()
     with c2:
         if st.button("🛑 Stop Bot", use_container_width=True):
             st.session_state.bot_running = False
+            st.rerun()
 
     st.subheader("📊 Live Audit Log")
     log_display = st.empty()
@@ -160,6 +169,7 @@ with tab1:
                     df_log = pd.read_csv('discord_audit_log.csv').tail(10)
                     log_display.table(df_log)
 
+                status_box.info("Status: 🔍 Detecting...")
                 r = requests.get(discord_url, headers=headers, timeout=5)
                 
                 if r.status_code == 200:
@@ -175,6 +185,7 @@ with tab1:
 
                         # --- PROCESS NEW MESSAGE ---
                         if msg_id != latest_message_id:
+                            status_box.warning("Status: ⚡ Triggered!")
                             # Immediate ID update to prevent double-processing
                             latest_message_id = msg_id 
                             st.session_state.last_activity = time.time()
@@ -195,6 +206,7 @@ with tab1:
                             is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
                             
                             if is_allowed and not skip_filters:
+                                status_box.warning("Status: 🧠 Thinking...")
                                 # Start typing immediately
                                 requests.post(typing_url, headers=headers)
                                 
@@ -212,6 +224,7 @@ with tab1:
                                 reply = response.choices[0].message.content
                                 
                                 if not enable_safety or safety_filter(reply):
+                                    status_box.success("Status: ✍️ Replying...")
                                     # Instant Reaction
                                     reaction_emoji = "👑" if is_owner else "💬"
                                     if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
@@ -227,6 +240,7 @@ with tab1:
                                     
                                     log_to_csv(author_username, content, "Replied")
 
+                status_box.info("Status: 🟢 Running / Idle")
                 # Sleep only AFTER processing
                 time.sleep(poll_speed)
 
