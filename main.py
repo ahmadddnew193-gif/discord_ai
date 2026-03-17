@@ -100,7 +100,7 @@ with st.sidebar:
     auto_restart = st.toggle("Auto-Restart (10min Idle)", value=True)
 
 # --- Tabs ---
-tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🎭 Chameleon", "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "🌈 Profile Glitcher"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10 = st.tabs(["🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🎭 Chameleon", "⛏️ Search Miner", "🎙️ VC Lurker", "✨ Hypesquad", "🌈 Profile Glitcher","Account Audit","Custom Prescense"])
 
 # --- TAB 1: BOT CONTROL ---
 with tab1:
