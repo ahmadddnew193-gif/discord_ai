@@ -31,8 +31,8 @@ if "typing_active" not in st.session_state:
     st.session_state.typing_active = False
 
 # --- Helper Functions ---
-def jitter_delay(min_s=0.5, max_s=2.5):
-    """Adds a random sleep to mimic human behavior."""
+def jitter_delay(min_s=0.1, max_s=0.5):
+    """Reduced jitter for faster performance while staying 'safe'."""
     time.sleep(random.uniform(min_s, max_s))
 
 def get_headers(tk):
@@ -54,7 +54,6 @@ def log_to_csv(author, content, action):
 def validate_token(tk):
     headers = get_headers(tk)
     try:
-        jitter_delay(0.2, 0.8)
         r = requests.get("https://discord.com/api/v9/users/@me", headers=headers, timeout=5)
         if r.status_code == 200:
             if tk != st.session_state.last_webhook_token:
@@ -65,14 +64,14 @@ def validate_token(tk):
     return False, None
 
 def add_reaction(channel_id, message_id, emoji, headers):
-    jitter_delay(0.2, 0.5)
+    # Removed heavy delay for instant feedback
     encoded_emoji = requests.utils.quote(emoji)
     url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
     requests.put(url, headers=headers)
 
 def safety_filter(text):
     """Checks for toxic or harmful content before sending."""
-    harmful_terms = ["self-harm", "suicide", "kys", "kill yourself", "harming myself", "toxicity_placeholder"]
+    harmful_terms = ["self-harm", "suicide", "kys", "kill yourself", "harming myself"]
     for term in harmful_terms:
         if term in text.lower():
             return False
@@ -103,9 +102,9 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ Bot Settings")
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
-    poll_speed = st.slider("Polling Frequency (Seconds)", 0.5, 10.0, 2.0)
-    resp_delay = st.slider("Response Delay (Seconds)", 0.0, 10.0, 0.5)
-    reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=10, value=1)
+    poll_speed = st.slider("Polling Frequency (Seconds)", 0.1, 5.0, 1.0)
+    resp_delay = st.slider("Response Delay (Seconds)", 0.0, 5.0, 0.0)
+    reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=5, value=0)
     enable_safety = st.toggle("Enable Safety Filter", value=True)
     
     emoji_pool_raw = st.text_input("Custom Emoji Pool", placeholder="🔥,💀,✅,🧠")
@@ -152,25 +151,16 @@ with tab1:
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
         
-        # Capture current state to avoid responding to history
         init_r = requests.get(discord_url, headers=headers)
         latest_message_id = init_r.json()[0]['id'] if init_r.status_code == 200 and init_r.json() else None
         
         while st.session_state.bot_running:
-            if time.time() - st.session_state.get('last_heartbeat', 0) > 300:
-                st.session_state.last_heartbeat = time.time()
-
-            if time.time() - st.session_state.last_activity > 600:
-                st.session_state.last_activity = time.time()
-                st.rerun()
-
             try:
                 if os.path.isfile('discord_audit_log.csv'):
                     df_log = pd.read_csv('discord_audit_log.csv').tail(10)
                     log_display.table(df_log)
 
-                time.sleep(poll_speed)
-                r = requests.get(discord_url, headers=headers, timeout=10)
+                r = requests.get(discord_url, headers=headers, timeout=5)
                 
                 if r.status_code == 200:
                     msgs = r.json()
@@ -181,29 +171,23 @@ with tab1:
                         content = latest['content'].strip()
                         msg_id = latest['id']
 
-                        # --- SIDEBAR DIAGNOSTIC WARNING ---
-                        if msg_id != latest_message_id:
-                            st.sidebar.warning(f"Detection: Author ID({author_id_real}) vs Owner ID({owner_id_input})")
-
                         is_owner = (owner_id_input and author_id_real == str(owner_id_input))
 
-                        # --- CORE LOGIC: NEW MESSAGE ONLY ---
+                        # --- PROCESS NEW MESSAGE ---
                         if msg_id != latest_message_id:
-                            
-                            # 1. IMMEDIATE SHUTDOWN (Owner only)
+                            # Immediate ID update to prevent double-processing
+                            latest_message_id = msg_id 
+                            st.session_state.last_activity = time.time()
+
+                            # 1. SHUTDOWN (Instant)
                             if is_owner and content.lower() == "shutdown":
-                                requests.post(discord_url, json={"content": "🛑 System Terminated by Owner."}, headers=headers)
-                                log_to_csv(author_username, content, "Shutdown Successful")
+                                requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
+                                log_to_csv(author_username, content, "Shutdown")
                                 st.session_state.bot_running = False
                                 st.rerun()
                                 break
 
-                            # 2. TRIGGER LOGIC:
-                            # We update the latest_message_id immediately so we don't double-process
-                            latest_message_id = msg_id 
-                            st.session_state.last_activity = time.time()
-
-                            # If it's a blacklisted user (and NOT the owner), skip
+                            # 2. FILTER & REPLY
                             if author_username in blacklisted_users and not is_owner:
                                 continue
 
@@ -211,43 +195,43 @@ with tab1:
                             is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
                             
                             if is_allowed and not skip_filters:
+                                # Start typing immediately
                                 requests.post(typing_url, headers=headers)
                                 
-                                # Prep Memory
+                                # Fast context fetch
                                 chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
                                 context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
                                 
                                 if isinstance(context_req, list):
                                     for m in reversed(context_req):
-                                        # Distinguish between Bot and User for AI context
                                         role = "assistant" if str(m['author']['id']) == str(my_id) else "user"
                                         chat_history.append({"role": role, "content": m['content']})
 
-                                # Get AI Response
+                                # Request AI response
                                 response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
                                 reply = response.choices[0].message.content
                                 
                                 if not enable_safety or safety_filter(reply):
-                                    # Reaction
+                                    # Instant Reaction
                                     reaction_emoji = "👑" if is_owner else "💬"
-                                    if reaction_delay > 0: time.sleep(reaction_delay)
+                                    if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
                                     add_reaction(channel_id_input, msg_id, reaction_emoji, headers)
                                     
-                                    # Reply
+                                    # Instant Reply
                                     if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
-                                    
                                     send_res = requests.post(discord_url, json={"content": reply}, headers=headers)
                                     
-                                    # CRITICAL: If owner is self, update ID to the bot's own reply ID immediately
+                                    # Sync ID if self-messaging
                                     if send_res.status_code == 200:
                                         latest_message_id = send_res.json()['id']
                                     
-                                    log_to_csv(author_username, content, "Replied (Owner Mode)" if is_owner else "Replied")
-                                else:
-                                    log_to_csv("SYSTEM", "Blocked harmful output", "Safety Filter")
+                                    log_to_csv(author_username, content, "Replied")
+
+                # Sleep only AFTER processing
+                time.sleep(poll_speed)
 
             except Exception as e:
-                time.sleep(5)
+                time.sleep(poll_speed)
                 continue
 
 # --- TABS 2-14 REMAIN UNCHANGED ---
