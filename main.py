@@ -65,7 +65,7 @@ def validate_token(tk):
     return False, None
 
 def add_reaction(channel_id, message_id, emoji, headers):
-    jitter_delay(0.5, 1.5)
+    jitter_delay(0.2, 0.5)
     encoded_emoji = requests.utils.quote(emoji)
     url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
     requests.put(url, headers=headers)
@@ -103,7 +103,12 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ Bot Settings")
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
-    reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=10, value=2)
+    
+    # --- SPEED TWEAKING ---
+    poll_speed = st.slider("Polling Frequency (Seconds)", 0.5, 10.0, 2.0, help="How often to check for new messages.")
+    resp_delay = st.slider("Response Delay (Seconds)", 0.0, 10.0, 0.5, help="Extra wait time before sending AI reply.")
+    
+    reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=10, value=1)
     
     enable_safety = st.toggle("Enable Safety Filter", value=True, help="Block toxic/self-harm AI outputs")
     
@@ -167,7 +172,9 @@ with tab1:
                     df_log = pd.read_csv('discord_audit_log.csv').tail(10)
                     log_display.table(df_log)
 
-                jitter_delay(1.0, 3.0)
+                # Polling frequency check
+                time.sleep(poll_speed)
+                
                 r = requests.get(discord_url, headers=headers, timeout=10)
                 if r.status_code == 200:
                     msgs = r.json()
@@ -178,7 +185,6 @@ with tab1:
                         if msg_id != latest_message_id and author != my_username:
                             st.session_state.last_activity = time.time()
                             
-                            # --- OWNER SHUTDOWN FEATURE ---
                             if author == owner_name and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 Shutting down..."}, headers=headers)
                                 st.session_state.bot_running = False
@@ -205,7 +211,10 @@ with tab1:
                                 if not enable_safety or safety_filter(reply):
                                     if reaction_delay > 0: time.sleep(reaction_delay)
                                     add_reaction(channel_id_input, msg_id, "💬", headers)
-                                    jitter_delay(1.5, 3.5)
+                                    
+                                    # USER-CONTROLLED RESPONSE DELAY
+                                    if resp_delay > 0: time.sleep(resp_delay)
+                                    
                                     requests.post(discord_url, json={"content": reply}, headers=headers)
                                     log_to_csv(author, content, "Replied")
                                 else:
@@ -213,7 +222,6 @@ with tab1:
                             
                             latest_message_id = msg_id
 
-                time.sleep(4)
             except Exception as e:
                 time.sleep(5)
                 continue
