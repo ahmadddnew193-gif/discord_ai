@@ -118,6 +118,7 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13
     "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander", "👻 Message Ghoster", "🎨 Text Color", "⏳ Infinite Typing"
 ])
 
+
 # --- TAB 1: BOT CONTROL ---
 with tab1:
     col1, col2 = st.columns(2)
@@ -139,6 +140,7 @@ with tab1:
         if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
             st.session_state.bot_running = True
             st.session_state.last_activity = time.time()
+            st.session_state.last_heartbeat = time.time() # Initialize heartbeat
     with c2:
         if st.button("🛑 Stop Bot", use_container_width=True):
             st.session_state.bot_running = False
@@ -153,6 +155,11 @@ with tab1:
         latest_message_id = None
         
         while st.session_state.bot_running:
+            # --- HEARTBEAT LOG (Every 5 mins) ---
+            if time.time() - st.session_state.get('last_heartbeat', 0) > 300:
+                print(f"[{datetime.now().strftime('%H:%M:%S')}] Heartbeat: Bot is actively polling.")
+                st.session_state.last_heartbeat = time.time()
+
             # --- AUTO-RESTART / RERUN LOGIC ---
             if time.time() - st.session_state.last_activity > 600:
                 st.session_state.last_activity = time.time()
@@ -198,8 +205,6 @@ with tab1:
 
                                 reply = client.chat.completions.create(model="openrouter/free", messages=chat_history).choices[0].message.content
                                 
-                                # --- SAFETY FILTER CHECK ---
-                                # Logic: If filter is enabled and text is harmful, block it. Otherwise, proceed.
                                 if not enable_safety or safety_filter(reply):
                                     if reaction_delay > 0: time.sleep(reaction_delay)
                                     add_reaction(channel_id_input, msg_id, "💬", headers)
@@ -214,7 +219,7 @@ with tab1:
                 time.sleep(4)
             except Exception as e:
                 time.sleep(5)
-                continue 
+                continue
 
 # --- TAB 2: SCRAPER ---
 with tab2:
