@@ -84,7 +84,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
 
         requests.post(typing_url, headers=headers)
         
-        # --- FIXED EMOJI LOGIC ---
         if emoji_pool:
             reaction_emoji = random.choice(emoji_pool)
         else:
@@ -108,7 +107,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             st.session_state.last_ai_content = reply.strip()
             requests.post(discord_url, json={"content": reply}, headers=headers)
             log_to_csv(author_username, content, "Reply Sent")
-    except Exception as e:
+    except Exception:
         pass
 
 # --- Sidebar ---
@@ -224,6 +223,12 @@ with tab1:
                                 st.rerun()
                                 break
 
+                            # --- INTEGRATED INCOMING SAFETY FILTER ---
+                            if enable_safety and not safety_filter(content):
+                                debug_box.code(debug_info + "❌ Result: Ignored (Toxic/Harmful Content)")
+                                latest_message_id = msg_id
+                                continue
+
                             if content == st.session_state.last_ai_content:
                                 debug_box.code(debug_info + "❌ Result: Ignored (Duplicate AI Content)")
                                 latest_message_id = msg_id
@@ -252,12 +257,11 @@ with tab1:
 
                             debug_box.code(debug_info + "✅ Result: TRIGGERING AI REPLY...")
                             status_box.warning("Status: 🧠 Processing Reply...")
-                            # Pass emoji_pool to background_reply
                             background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool)
 
                 status_box.info("Status: 🟢 Running / Idle")
                 time.sleep(poll_speed)
-            except Exception as e:
+            except Exception:
                 time.sleep(poll_speed)
                 continue
 
