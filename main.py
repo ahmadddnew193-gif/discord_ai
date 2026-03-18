@@ -324,33 +324,77 @@ with tab7:
                         st.write(f"**Scopes:** `{', '.join(a.get('scopes', []))}`")
             else: st.info("No external applications found.")
 
+
 with tab8:
     st.header("🎙️ VC Lurker")
     v_guild_id = st.text_input("Voice Guild ID (Server ID)")
-    if st.button("🔍 Scan All Voice Channels", use_container_width=True):
+    
+    # Optional: Filter for a specific channel to make it faster
+    target_vc_id = st.text_input("Specific Channel ID (Optional - leave blank for all)")
+
+    if st.button("🔍 Scan Server Voice Status", use_container_width=True):
         if token and v_guild_id:
             headers = get_headers(token)
-            # Discord API endpoint for guild voice states
-            res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=headers)
+            
+            # We fetch guild members which includes their voice states
+            # Note: This works best in smaller/medium servers. 
+            # In massive servers, Discord may limit the return to the first 1000 members.
+            res = requests.get(
+                f"https://discord.com/api/v9/guilds/{v_guild_id}/members?limit=1000", 
+                headers=headers
+            )
             
             if res.status_code == 200:
-                states = res.json()
+                members = res.json()
+                active_vcs = []
+                
+                for member in members:
+                    # Check if the member has a 'presence' or 'voice_state'
+                    # The API structure for /members includes 'user' and sometimes voice info
+                    # However, the most reliable 'lurker' way is to hit the channel directly 
+                    # if you have the ID, or use the guild-level voice state tracker.
+                    pass
+
+                # NEW APPROACH: Since Discord REST is strict, we hit the Guild preview/channels 
+                # to see current status or use the most reliable endpoint for voice states:
+                voice_res = requests.get(
+                    f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", 
+                    headers=headers
+                )
+                
+                # If the specific voice-states endpoint fails, we fallback to a search
+                if voice_res.status_code != 200:
+                    st.error("⚠️ Discord restricted the global voice-states endpoint. Trying fallback...")
+                    # Fallback: Check if we can see the 'voice_states' in the guild object
+                    voice_res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}", headers=headers)
+                
+                states = voice_res.json().get('voice_states', []) if voice_res.status_code == 200 else []
+                
                 if states:
-                    st.info(f"Found {len(states)} user(s) in voice channels.")
                     data_list = []
                     for s in states:
+                        chan_id = s.get('channel_id')
+                        # Filter if a specific channel was requested
+                        if target_vc_id and chan_id != target_vc_id:
+                            continue
+                            
                         data_list.append({
                             "User ID": s.get('user_id'),
-                            "Channel ID": s.get('channel_id'),
-                            "Muted": s.get('self_mute'),
-                            "Deafened": s.get('self_deaf'),
-                            "Streaming": s.get('self_video') or s.get('self_stream')
+                            "Channel ID": chan_id,
+                            "Muted": "🔇" if s.get('self_mute') or s.get('mute') else "🔊",
+                            "Deaf": "🛑" if s.get('self_deaf') or s.get('deaf') else "👂",
+                            "Video": "📹" if s.get('self_video') else "❌"
                         })
-                    st.table(pd.DataFrame(data_list))
+                    
+                    if data_list:
+                        st.success(f"Found {len(data_list)} users in Voice Channels!")
+                        st.table(pd.DataFrame(data_list))
+                    else:
+                        st.warning("No users found in the specified channel(s).")
                 else:
-                    st.warning("No users currently active in any voice channels in this server.")
+                    st.warning("No active voice states found. The server might be empty or the API is hidden for this guild.")
             else:
-                st.error(f"Failed to fetch. Error Code: {res.status_code}. Ensure the ID is correct and you are in the server.")
+                st.error(f"Error {res.status_code}: Make sure the Bot/Token is actually IN the server.")
         else:
             st.error("Please provide both your Token and the Guild ID.")
 
