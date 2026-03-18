@@ -12,27 +12,39 @@ import base64
 st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
 
 # --- SECURE LOGIN SYSTEM ---
-
 MASTER_KEY = st.secrets["MASTER_KEY"]
+CODE_FILE = "active_code.txt"
 
-if "access_granted" not in st.session_state:
-    st.session_state.access_granted = False
-if "current_6digit_code" not in st.session_state:
-    st.session_state.current_6digit_code = None
-if "code_timestamp" not in st.session_state:
-    st.session_state.code_timestamp = None
+# --- GLOBAL ACCESS FUNCTIONS ---
+def set_global_code(code):
+    with open(CODE_FILE, "w") as f:
+        f.write(f"{code},{time.time()}")
 
-# --- ACCESS LOGGING FUNCTION ---
+def get_global_code():
+    if os.path.exists(CODE_FILE):
+        try:
+            with open(CODE_FILE, "r") as f:
+                data = f.read().split(",")
+                if len(data) == 2:
+                    return data[0], float(data[1])
+        except:
+            return None, None
+    return None, None
+
 def log_access_event():
     with open("access_log.txt", "a") as f:
         f.write(f"Access Granted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-# --- SELF-DESTRUCT LOGIC ---
-# Automatically clears the code after 10 minutes (600 seconds)
-if st.session_state.current_6digit_code and st.session_state.code_timestamp:
-    if time.time() - st.session_state.code_timestamp > 600:
-        st.session_state.current_6digit_code = None
-        st.session_state.code_timestamp = None
+# Initialize local session state
+if "access_granted" not in st.session_state:
+    st.session_state.access_granted = False
+
+# Self-destruct logic (Check if the file-based code is older than 10 mins)
+shared_code, shared_time = get_global_code()
+if shared_code and shared_time:
+    if time.time() - shared_time > 600:
+        if os.path.exists(CODE_FILE):
+            os.remove(CODE_FILE)
         st.session_state.access_granted = False
 
 # --- SIDEBAR LOGIN CONTROL ---
@@ -41,20 +53,21 @@ with st.sidebar:
     admin_input = st.text_input("Owner Master Key", type="password", help="Only the owner uses this to generate the session code.")
     
     if admin_input == MASTER_KEY:
-        if st.button("🎲 Generate New 6-Digit Code"):
-            st.session_state.current_6digit_code = str(random.randint(100000, 999999))
-            st.session_state.code_timestamp = time.time()
-            st.success(f"ACTIVE CODE: {st.session_state.current_6digit_code}")
-            st.info("⚠️ This code will self-destruct in 10 minutes.")
+        if st.button("🎲 Generate Global 6-Digit Code"):
+            new_code = str(random.randint(100000, 999999))
+            set_global_code(new_code)
+            st.success(f"ACTIVE CODE: {new_code}")
+            st.info("⚠️ This code is now valid for ALL users for 10 minutes.")
     
     st.divider()
     
     if not st.session_state.access_granted:
         user_code_attempt = st.text_input("Enter 6-Digit Access Code")
         if st.button("Unlock System"):
-            if st.session_state.current_6digit_code and user_code_attempt == st.session_state.current_6digit_code:
+            current_valid_code, _ = get_global_code()
+            if current_valid_code and user_code_attempt == current_valid_code:
                 st.session_state.access_granted = True
-                log_access_event() # Records the login event
+                log_access_event()
                 st.rerun()
             else:
                 st.error("Invalid or Expired Code")
@@ -62,7 +75,7 @@ with st.sidebar:
 # --- GATEKEEPER CHECK ---
 if not st.session_state.access_granted:
     st.title("🛡️ Discord AI - Locked")
-    st.info("Please contact the owner for the current 6-digit access code.")
+    st.info("Please contact the owner for the current global 6-digit access code.")
     st.stop() 
 
 # --- START OF ORIGINAL CODE ---
