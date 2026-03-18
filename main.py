@@ -87,6 +87,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
         add_reaction(latest['channel_id'], msg_id, reaction_emoji, headers)
 
+        # PAST MESSAGE CONTEXT LOGIC
         chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
         if isinstance(context_req, list):
@@ -158,7 +159,6 @@ with tab1:
         allowed_input = st.text_input("Allowed Users", value="everyone")
         blacklisted_users_input = st.text_input("Blacklisted Users", placeholder="annoying_user1, troll_user2")
 
-    # Allowed users can now be usernames or numerical IDs
     allowed_users = "everyone" if allowed_input.lower().strip() == "everyone" else [u.strip().lower() for u in allowed_input.split(",") if u.strip()]
     blacklisted_users = [u.strip().lower() for u in blacklisted_users_input.split(",") if u.strip()]
     blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
@@ -208,11 +208,11 @@ with tab1:
                         msg_id = latest['id']
                         is_owner = (owner_id_input and author_id_real == str(owner_id_input))
 
-                        # Updated Debug Console
-                        debug_box.code(f"Current Bot ID: {my_id}\nDetected User ID: {author_id_real}\nIs Owner: {is_owner}\nMessage: {content[:30]}")
-
                         if msg_id != latest_message_id:
-                            # 1. OWNER COMMANDS (Priority check - before self-loop check)
+                            # --- DIAGNOSTIC LOGGING ---
+                            debug_info = f"Bot ID: {my_id} | User ID: {author_id_real}\nIs Owner: {is_owner} | Msg: {content[:20]}...\n"
+                            
+                            # 1. OWNER COMMANDS
                             if is_owner and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
                                 log_to_csv(author_username, content, "Shutdown")
@@ -220,27 +220,38 @@ with tab1:
                                 st.rerun()
                                 break
 
-                            # 2. ANTI-SELF LOOP (Prevent the AI from talking to itself)
+                            # 2. ANTI-SELF LOOP
                             if author_id_real == str(my_id) or content == st.session_state.last_ai_content:
+                                debug_box.code(debug_info + "❌ Result: Ignored (Self-Loop/Duplicate)")
                                 latest_message_id = msg_id
                                 continue
 
-                            # 3. FILTERS & ALLOWED USERS (Checked by Username or ID)
+                            # 3. FILTERS
                             latest_message_id = msg_id 
                             st.session_state.last_activity = time.time()
                             
                             if (author_username in blacklisted_users or author_id_real in blacklisted_users) and not is_owner:
+                                debug_box.code(debug_info + "❌ Result: Ignored (User Blacklisted)")
                                 continue
 
-                            skip_filters = False if is_owner else any(w in content.lower() for w in blacklist)
+                            skip_filters = False if is_owner else any(w in content.lower() for w in blacklist if w)
                             is_allowed = (allowed_users == "everyone" or 
                                          author_username in allowed_users or 
                                          author_id_real in allowed_users or 
                                          is_owner)
                             
-                            if is_allowed and not skip_filters:
-                                status_box.warning("Status: 🧠 Processing Reply...")
-                                background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input)
+                            if not is_allowed:
+                                debug_box.code(debug_info + "❌ Result: Ignored (Not in Allowed List)")
+                                continue
+                                
+                            if skip_filters:
+                                debug_box.code(debug_info + "❌ Result: Ignored (Keyword Match)")
+                                continue
+
+                            # 4. SUCCESS - CALLING REPLY
+                            debug_box.code(debug_info + "✅ Result: TRIGGERING AI REPLY...")
+                            status_box.warning("Status: 🧠 Processing Reply...")
+                            background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input)
 
                 status_box.info("Status: 🟢 Running / Idle")
                 time.sleep(poll_speed)
