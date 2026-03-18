@@ -11,13 +11,29 @@ import base64
 
 st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
 
-# --- LOGIN SYSTEM SETTINGS ---
-MASTER_KEY = "AHMAD_ADMIN_2026" # Change this to your private secret password
+# --- SECURE LOGIN SYSTEM ---
+
+MASTER_KEY = st.secrets["MASTER_KEY"]
 
 if "access_granted" not in st.session_state:
     st.session_state.access_granted = False
 if "current_6digit_code" not in st.session_state:
     st.session_state.current_6digit_code = None
+if "code_timestamp" not in st.session_state:
+    st.session_state.code_timestamp = None
+
+# --- ACCESS LOGGING FUNCTION ---
+def log_access_event():
+    with open("access_log.txt", "a") as f:
+        f.write(f"Access Granted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+# --- SELF-DESTRUCT LOGIC ---
+# Automatically clears the code after 10 minutes (600 seconds)
+if st.session_state.current_6digit_code and st.session_state.code_timestamp:
+    if time.time() - st.session_state.code_timestamp > 600:
+        st.session_state.current_6digit_code = None
+        st.session_state.code_timestamp = None
+        st.session_state.access_granted = False
 
 # --- SIDEBAR LOGIN CONTROL ---
 with st.sidebar:
@@ -27,7 +43,9 @@ with st.sidebar:
     if admin_input == MASTER_KEY:
         if st.button("🎲 Generate New 6-Digit Code"):
             st.session_state.current_6digit_code = str(random.randint(100000, 999999))
+            st.session_state.code_timestamp = time.time()
             st.success(f"ACTIVE CODE: {st.session_state.current_6digit_code}")
+            st.info("⚠️ This code will self-destruct in 10 minutes.")
     
     st.divider()
     
@@ -36,6 +54,7 @@ with st.sidebar:
         if st.button("Unlock System"):
             if st.session_state.current_6digit_code and user_code_attempt == st.session_state.current_6digit_code:
                 st.session_state.access_granted = True
+                log_access_event() # Records the login event
                 st.rerun()
             else:
                 st.error("Invalid or Expired Code")
@@ -279,9 +298,9 @@ with tab1:
 
                             skip_filters = False if is_owner else any(w in content.lower() for w in blacklist if w)
                             is_allowed = (allowed_users == "everyone" or 
-                                         author_username in allowed_users or 
-                                         author_id_real in allowed_users or 
-                                         is_owner)
+                                           author_username in allowed_users or 
+                                           author_id_real in allowed_users or 
+                                           is_owner)
                             
                             if not is_allowed:
                                 debug_box.code(debug_info + "❌ Result: Ignored (Not in Allowed List)")
@@ -390,7 +409,6 @@ with tab8:
                 st.error(f"Error {res.status_code}")
         else:
             st.error("Please fill in the Token, Server ID, and Channel ID.")
-
 
 with tab9:
     st.header("✨ HypeSquad Spoofer")
