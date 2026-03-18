@@ -29,6 +29,11 @@ if "last_activity" not in st.session_state:
     st.session_state.last_activity = time.time()
 if "typing_active" not in st.session_state:
     st.session_state.typing_active = False
+# FIX: Persist the message ID and Console Logs
+if "latest_message_id" not in st.session_state:
+    st.session_state.latest_message_id = None
+if "console_logs" not in st.session_state:
+    st.session_state.console_logs = []
 
 # --- Helper Functions ---
 def jitter_delay(min_s=0.1, max_s=0.5):
@@ -40,8 +45,18 @@ def get_headers(tk):
     return {
         "Authorization": tk,
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Origin": "https://discord.com",
+        "Referer": "https://discord.com/channels/@me"
     }
+
+def add_log(msg):
+    """Adds a timestamped message to the console log."""
+    ts = datetime.now().strftime('%H:%M:%S')
+    st.session_state.console_logs.append(f"[{ts}] {msg}")
+    if len(st.session_state.console_logs) > 50:
+        st.session_state.console_logs.pop(0)
 
 def log_to_csv(author, content, action):
     file_exists = os.path.isfile('discord_audit_log.csv')
@@ -64,10 +79,10 @@ def validate_token(tk):
     return False, None
 
 def add_reaction(channel_id, message_id, emoji, headers):
-    # Removed heavy delay for instant feedback
     encoded_emoji = requests.utils.quote(emoji)
     url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
-    requests.put(url, headers=headers)
+    r = requests.put(url, headers=headers)
+    return r.status_code
 
 def safety_filter(text):
     """Checks for toxic or harmful content before sending."""
@@ -102,7 +117,6 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ Bot Settings")
     
-    # NEW: Status Indicator Added Here
     if st.session_state.bot_running:
         st.markdown("### 📡 Connection Status")
         status_box = st.empty()
@@ -144,13 +158,21 @@ with tab1:
     with c1:
         if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
             st.session_state.bot_running = True
-            st.session_state.last_activity = time.time()
-            st.session_state.last_heartbeat = time.time()
+            st.session_state.latest_message_id = None # Reset on fresh launch
+            st.session_state.console_logs = []
+            add_log("Bot system initialized.")
             st.rerun()
     with c2:
         if st.button("🛑 Stop Bot", use_container_width=True):
             st.session_state.bot_running = False
+            add_log("Bot manually stopped.")
             st.rerun()
+
+    # --- LIVE CONSOLE LOG WINDOW ---
+    st.subheader("📟 Live Console Log")
+    console_display = st.empty()
+    console_text = "\n".join(st.session_state.console_logs[::-1])
+    console_display.code(console_text if console_text else "Waiting for activity...", language="bash")
 
     st.subheader("📊 Live Audit Log")
     log_display = st.empty()
@@ -160,9 +182,13 @@ with tab1:
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
         
-        init_r = requests.get(discord_url, headers=headers)
-        latest_message_id = init_r.json()[0]['id'] if init_r.status_code == 200 and init_r.json() else None
-        
+        # Initial check to set the baseline message ID if not set
+        if st.session_state.latest_message_id is None:
+            init_r = requests.get(discord_url, headers=headers)
+            if init_r.status_code == 200 and init_r.json():
+                st.session_state.latest_message_id = init_r.json()[0]['id']
+                add_log(f"Baseline established. Monitoring Channel: {channel_id_input}")
+
         while st.session_state.bot_running:
             try:
                 if os.path.isfile('discord_audit_log.csv'):
@@ -184,30 +210,39 @@ with tab1:
                         is_owner = (owner_id_input and author_id_real == str(owner_id_input))
 
                         # --- PROCESS NEW MESSAGE ---
-                        if msg_id != latest_message_id:
+                        if msg_id != st.session_state.latest_message_id:
+                            # Immediate self-check: Don't reply to self!
+                            if author_id_real == str(my_id):
+                                st.session_state.latest_message_id = msg_id
+                                continue
+
                             status_box.warning("Status: ⚡ Triggered!")
-                            # Immediate ID update to prevent double-processing
-                            latest_message_id = msg_id 
+                            add_log(f"New message from {author_username}: {content[:30]}...")
+                            
+                            # Persistent ID update
+                            st.session_state.latest_message_id = msg_id 
                             st.session_state.last_activity = time.time()
 
-                            # 1. SHUTDOWN (Instant)
+                            # 1. SHUTDOWN (Instant - OWNER PERK)
                             if is_owner and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
                                 log_to_csv(author_username, content, "Shutdown")
+                                add_log("Shutdown command received from Owner.")
                                 st.session_state.bot_running = False
                                 st.rerun()
                                 break
 
                             # 2. FILTER & REPLY
                             if author_username in blacklisted_users and not is_owner:
+                                add_log(f"Ignored blacklisted user: {author_username}")
                                 continue
 
+                            # OWNER PERK: Owners bypass blacklist
                             skip_filters = False if is_owner else any(w in content.lower() for w in blacklist)
                             is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
                             
                             if is_allowed and not skip_filters:
                                 status_box.warning("Status: 🧠 Thinking...")
-                                # Start typing immediately
                                 requests.post(typing_url, headers=headers)
                                 
                                 # Fast context fetch
@@ -225,7 +260,8 @@ with tab1:
                                 
                                 if not enable_safety or safety_filter(reply):
                                     status_box.success("Status: ✍️ Replying...")
-                                    # Instant Reaction
+                                    
+                                    # OWNER PERK: Special Reaction
                                     reaction_emoji = "👑" if is_owner else "💬"
                                     if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
                                     add_reaction(channel_id_input, msg_id, reaction_emoji, headers)
@@ -234,17 +270,24 @@ with tab1:
                                     if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
                                     send_res = requests.post(discord_url, json={"content": reply}, headers=headers)
                                     
-                                    # Sync ID if self-messaging
                                     if send_res.status_code == 200:
-                                        latest_message_id = send_res.json()['id']
+                                        # Set ID to the bot's own message to avoid double-triggers
+                                        st.session_state.latest_message_id = send_res.json()['id']
+                                        add_log(f"Successfully replied to {author_username}")
                                     
                                     log_to_csv(author_username, content, "Replied")
+                                else:
+                                    add_log("AI response blocked by safety filter.")
 
+                # Update Console Log UI
+                console_text = "\n".join(st.session_state.console_logs[::-1])
+                console_display.code(console_text, language="bash")
+                
                 status_box.info("Status: 🟢 Running / Idle")
-                # Sleep only AFTER processing
                 time.sleep(poll_speed)
 
             except Exception as e:
+                add_log(f"Error: {str(e)}")
                 time.sleep(poll_speed)
                 continue
 
