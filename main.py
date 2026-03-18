@@ -39,7 +39,7 @@ def log_access_event():
 if "access_granted" not in st.session_state:
     st.session_state.access_granted = False
 
-# Self-destruct logic (Check if the file-based code is older than 10 mins)
+# Self-destruct logic
 shared_code, shared_time = get_global_code()
 if shared_code and shared_time:
     if time.time() - shared_time > 600:
@@ -152,7 +152,8 @@ def safety_filter(text):
             return False
     return True
 
-def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool):
+# --- REWRITTEN BACKGROUND REPLY WITH CONTEXTUAL MEMORY ---
+def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool):
     try:
         author_username = latest['author']['username'].lower()
         content = latest['content'].strip()
@@ -169,12 +170,18 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
         add_reaction(latest['channel_id'], msg_id, reaction_emoji, headers)
 
-        chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
+        # Build dynamic context from channel history
+        chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}. Your username is {my_username}."}]
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
+        
         if isinstance(context_req, list):
+            # Sort messages oldest to newest
             for m in reversed(context_req):
+                # Determine role based on ID
                 role = "assistant" if str(m['author']['id']) == str(my_id) else "user"
-                chat_history.append({"role": role, "content": m['content']})
+                # Include sender name in context for better tracking
+                sender = f"[{m['author']['username']}]: " if role == "user" else ""
+                chat_history.append({"role": role, "content": f"{sender}{m['content']}"})
 
         response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
         reply = response.choices[0].message.content
@@ -233,13 +240,17 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13
 with tab1:
     col1, col2 = st.columns(2)
     with col1:
-        # Persona Switcher Feature
+        # EXPANDED PERSONA DICTIONARY
         persona_dict = {
             "Custom": "",
             "Helpful Assistant": "You are a helpful and polite assistant.",
-            "Sarcastic Bot": "You are a sarcastic, witty bot who uses emojis and jokes.",
-            "Technical Support": "You are a highly technical expert who gives concise, direct answers.",
-            "Chaos Mode": "You are a chaotic, unpredictable entity. Keep replies short and weird."
+            "Sarcastic Bot": "You are a sarcastic, witty bot who uses emojis and jokes. You find most questions silly.",
+            "Technical Support": "You are a highly technical expert. Give concise, direct answers with documentation style.",
+            "Chaos Mode": "You are a chaotic, unpredictable entity. Keep replies short and weird.",
+            "Cyberpunk Hacker": "You are a Netrunner. Use lingo like 'breaching', 'uplink', and 'mainframe'. You speak in a digital, edgy tone.",
+            "Stoic Philosopher": "You are a philosopher like Marcus Aurelius. Your answers are calm, logical, and focused on virtue.",
+            "Gamer Streamer": "You are a hyped up streamer. Use words like 'POG', 'L', 'W', and 'sus'. Constantly refer to your chat.",
+            "The Detective": "You speak like a character from a Noir film. Everything is a mystery and you are investigating the user."
         }
         selected_persona = st.selectbox("Preset Personas", list(persona_dict.keys()))
         
@@ -344,7 +355,7 @@ with tab1:
 
                             debug_box.code(debug_info + "✅ Result: TRIGGERING AI REPLY...")
                             status_box.warning("Status: 🧠 Processing Reply...")
-                            background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool)
+                            background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool)
 
                 status_box.info("Status: 🟢 Running / Idle")
                 time.sleep(poll_speed)
