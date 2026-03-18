@@ -33,6 +33,9 @@ if "last_activity" not in st.session_state:
     st.session_state.last_activity = time.time()
 if "typing_active" not in st.session_state:
     st.session_state.typing_active = False
+# Track last AI content to prevent self-loops
+if "last_ai_content" not in st.session_state:
+    st.session_state.last_ai_content = None
 
 # --- Helper Functions ---
 def jitter_delay(min_s=0.1, max_s=0.5):
@@ -68,7 +71,6 @@ def validate_token(tk):
     return False, None
 
 def add_reaction(channel_id, message_id, emoji, headers):
-    # Removed heavy delay for instant feedback
     encoded_emoji = requests.utils.quote(emoji)
     url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
     requests.put(url, headers=headers)
@@ -81,7 +83,7 @@ def safety_filter(text):
             return False
     return True
 
-def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay):
+def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input):
     """Handles AI logic in a separate thread to prevent blocking."""
     try:
         author_username = latest['author']['username'].lower()
@@ -93,7 +95,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         requests.post(typing_url, headers=headers)
         reaction_emoji = "👑" if is_owner else "💬"
         if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
-        add_reaction(channel_id_input, msg_id, reaction_emoji, headers)
+        add_reaction(latest['channel_id'], msg_id, reaction_emoji, headers)
 
         # 2. Context
         chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
@@ -109,9 +111,13 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         
         if not enable_safety or safety_filter(reply):
             if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
+            
+            # Update state before sending to ensure loop catches the content
+            st.session_state.last_ai_content = reply.strip()
+            
             requests.post(discord_url, json={"content": reply}, headers=headers)
             log_to_csv(author_username, content, "Threaded Reply")
-    except:
+    except Exception as e:
         pass
 
 # --- Sidebar ---
@@ -181,7 +187,7 @@ with tab1:
         if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
             st.session_state.bot_running = True
             st.session_state.last_activity = time.time()
-            st.session_state.last_heartbeat = time.time()
+            st.session_state.last_ai_content = None 
             st.rerun()
     with c2:
         if st.button("🛑 Stop Bot", use_container_width=True):
@@ -221,11 +227,17 @@ with tab1:
 
                         # --- PROCESS NEW MESSAGE ---
                         if msg_id != latest_message_id:
+                            # ANTI-SELF LOOP: Compare content and LOG to console
+                            if content == st.session_state.last_ai_content:
+                                print(f"[LOG] Ignored self-loop message: \"{content[:30]}...\"")
+                                latest_message_id = msg_id
+                                continue
+
                             status_box.warning("Status: ⚡ Triggered!")
                             latest_message_id = msg_id 
                             st.session_state.last_activity = time.time()
 
-                            # 1. SHUTDOWN (Instant)
+                            # 1. SHUTDOWN
                             if is_owner and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
                                 log_to_csv(author_username, content, "Shutdown")
@@ -242,8 +254,7 @@ with tab1:
                             
                             if is_allowed and not skip_filters:
                                 status_box.warning("Status: 🧠 Background Processing...")
-                                # OFF-LOAD TO THREAD: This keeps the loop running!
-                                executor.submit(background_reply, latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay)
+                                executor.submit(background_reply, latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input)
 
                 status_box.info("Status: 🟢 Running / Idle")
                 time.sleep(poll_speed)
