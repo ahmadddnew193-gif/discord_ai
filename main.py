@@ -10,6 +10,43 @@ import pandas as pd
 import base64
 
 st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
+
+# --- LOGIN SYSTEM SETTINGS ---
+MASTER_KEY = "AHMAD_ADMIN_2026" # Change this to your private secret password
+
+if "access_granted" not in st.session_state:
+    st.session_state.access_granted = False
+if "current_6digit_code" not in st.session_state:
+    st.session_state.current_6digit_code = None
+
+# --- SIDEBAR LOGIN CONTROL ---
+with st.sidebar:
+    st.header("🔐 System Access")
+    admin_input = st.text_input("Owner Master Key", type="password", help="Only the owner uses this to generate the session code.")
+    
+    if admin_input == MASTER_KEY:
+        if st.button("🎲 Generate New 6-Digit Code"):
+            st.session_state.current_6digit_code = str(random.randint(100000, 999999))
+            st.success(f"ACTIVE CODE: {st.session_state.current_6digit_code}")
+    
+    st.divider()
+    
+    if not st.session_state.access_granted:
+        user_code_attempt = st.text_input("Enter 6-Digit Access Code")
+        if st.button("Unlock System"):
+            if st.session_state.current_6digit_code and user_code_attempt == st.session_state.current_6digit_code:
+                st.session_state.access_granted = True
+                st.rerun()
+            else:
+                st.error("Invalid or Expired Code")
+
+# --- GATEKEEPER CHECK ---
+if not st.session_state.access_granted:
+    st.title("🛡️ Discord AI - Locked")
+    st.info("Please contact the owner for the current 6-digit access code.")
+    st.stop() 
+
+# --- START OF ORIGINAL CODE ---
 st.title("Discord AI Bot & History Scraper")
 
 # --- Initialize Session State ---
@@ -110,7 +147,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
     except Exception:
         pass
 
-# --- Sidebar ---
+# --- Sidebar Bot Settings ---
 with st.sidebar:
     st.header("🔑 Authentication")
     token = st.text_input("Discord Token", type="password")
@@ -332,35 +369,25 @@ with tab8:
     if st.button("📡 Scan Voice Channel", use_container_width=True):
         if token and target_guild_id and target_vc_id:
             h = get_headers(token)
-            # We fetch the specific channel's data
             res = requests.get(f"https://discord.com/api/v9/channels/{target_vc_id}", headers=h)
             
             if res.status_code == 200:
                 channel_data = res.json()
                 st.write(f"### Scanning: {channel_data.get('name', 'Unknown Channel')}")
-                
-                # Fetching the guild's current voice states via a different route
-                # This works if your account/bot is currently IN the server
-                states_res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild_id}/regions", headers=h)
-                
-                # Fallback: Scrape recent messages in that VC (some users show up there)
-                # or check if the member list is accessible
                 mem_res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild_id}/members?limit=100", headers=h)
                 
                 if mem_res.status_code == 200:
                     members = mem_res.json()
                     found = []
                     for m in members:
-                        # Some API responses include 'communication_disabled_until' or 'voice' status
                         if 'user' in m:
                             found.append({"User": m['user']['username'], "ID": m['user']['id']})
-                    
-                    st.success("Fetched local member list. Note: Direct VC state via REST is limited by Discord's 2026 security updates.")
+                    st.success("Fetched local member list.")
                     st.table(pd.DataFrame(found))
                 else:
-                    st.error(f"Access Denied (403). Your token does not have 'View Channel' permissions for {target_vc_id}.")
+                    st.error(f"Access Denied (403).")
             else:
-                st.error(f"Error {res.status_code}: Channel not found or restricted.")
+                st.error(f"Error {res.status_code}")
         else:
             st.error("Please fill in the Token, Server ID, and Channel ID.")
 
