@@ -29,11 +29,13 @@ if "last_activity" not in st.session_state:
     st.session_state.last_activity = time.time()
 if "typing_active" not in st.session_state:
     st.session_state.typing_active = False
-# FIX: Persist the message ID and Console Logs
 if "latest_message_id" not in st.session_state:
     st.session_state.latest_message_id = None
 if "console_logs" not in st.session_state:
     st.session_state.console_logs = []
+# NEW: Track last AI content to prevent self-loops
+if "last_ai_content" not in st.session_state:
+    st.session_state.last_ai_content = None
 
 # --- Helper Functions ---
 def jitter_delay(min_s=0.1, max_s=0.5):
@@ -45,10 +47,7 @@ def get_headers(tk):
     return {
         "Authorization": tk,
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Accept": "*/*",
-        "Origin": "https://discord.com",
-        "Referer": "https://discord.com/channels/@me"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
 def add_log(msg):
@@ -81,8 +80,7 @@ def validate_token(tk):
 def add_reaction(channel_id, message_id, emoji, headers):
     encoded_emoji = requests.utils.quote(emoji)
     url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
-    r = requests.put(url, headers=headers)
-    return r.status_code
+    requests.put(url, headers=headers)
 
 def safety_filter(text):
     """Checks for toxic or harmful content before sending."""
@@ -158,17 +156,17 @@ with tab1:
     with c1:
         if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
             st.session_state.bot_running = True
-            st.session_state.latest_message_id = None # Reset on fresh launch
+            st.session_state.latest_message_id = None
+            st.session_state.last_ai_content = None
             st.session_state.console_logs = []
-            add_log("Bot system initialized.")
+            add_log("Bot system launched.")
             st.rerun()
     with c2:
         if st.button("🛑 Stop Bot", use_container_width=True):
             st.session_state.bot_running = False
-            add_log("Bot manually stopped.")
+            add_log("Bot stopped.")
             st.rerun()
 
-    # --- LIVE CONSOLE LOG WINDOW ---
     st.subheader("📟 Live Console Log")
     console_display = st.empty()
     console_text = "\n".join(st.session_state.console_logs[::-1])
@@ -182,12 +180,11 @@ with tab1:
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
         
-        # Initial check to set the baseline message ID if not set
+        # Baseline ID fetch
         if st.session_state.latest_message_id is None:
             init_r = requests.get(discord_url, headers=headers)
             if init_r.status_code == 200 and init_r.json():
                 st.session_state.latest_message_id = init_r.json()[0]['id']
-                add_log(f"Baseline established. Monitoring Channel: {channel_id_input}")
 
         while st.session_state.bot_running:
             try:
@@ -211,33 +208,29 @@ with tab1:
 
                         # --- PROCESS NEW MESSAGE ---
                         if msg_id != st.session_state.latest_message_id:
-                            # Immediate self-check: Don't reply to self!
-                            if author_id_real == str(my_id):
+                            # ANTI-SELF LOOP: Compare content instead of ID
+                            if content == st.session_state.last_ai_content:
                                 st.session_state.latest_message_id = msg_id
                                 continue
 
                             status_box.warning("Status: ⚡ Triggered!")
-                            add_log(f"New message from {author_username}: {content[:30]}...")
-                            
-                            # Persistent ID update
+                            add_log(f"Msg detected from {author_username}")
                             st.session_state.latest_message_id = msg_id 
                             st.session_state.last_activity = time.time()
 
-                            # 1. SHUTDOWN (Instant - OWNER PERK)
+                            # 1. SHUTDOWN (Instant)
                             if is_owner and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
                                 log_to_csv(author_username, content, "Shutdown")
-                                add_log("Shutdown command received from Owner.")
+                                add_log("Shutdown triggered by owner.")
                                 st.session_state.bot_running = False
                                 st.rerun()
                                 break
 
                             # 2. FILTER & REPLY
                             if author_username in blacklisted_users and not is_owner:
-                                add_log(f"Ignored blacklisted user: {author_username}")
                                 continue
 
-                            # OWNER PERK: Owners bypass blacklist
                             skip_filters = False if is_owner else any(w in content.lower() for w in blacklist)
                             is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
                             
@@ -261,28 +254,27 @@ with tab1:
                                 if not enable_safety or safety_filter(reply):
                                     status_box.success("Status: ✍️ Replying...")
                                     
-                                    # OWNER PERK: Special Reaction
+                                    # Instant Reaction (Owner Perk)
                                     reaction_emoji = "👑" if is_owner else "💬"
                                     if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
                                     add_reaction(channel_id_input, msg_id, reaction_emoji, headers)
                                     
                                     # Instant Reply
                                     if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
+                                    
+                                    # STORE CONTENT BEFORE SENDING TO PREVENT LOOP
+                                    st.session_state.last_ai_content = reply.strip()
+                                    
                                     send_res = requests.post(discord_url, json={"content": reply}, headers=headers)
                                     
                                     if send_res.status_code == 200:
-                                        # Set ID to the bot's own message to avoid double-triggers
                                         st.session_state.latest_message_id = send_res.json()['id']
-                                        add_log(f"Successfully replied to {author_username}")
+                                        add_log(f"Replied to {author_username}")
                                     
                                     log_to_csv(author_username, content, "Replied")
-                                else:
-                                    add_log("AI response blocked by safety filter.")
 
-                # Update Console Log UI
                 console_text = "\n".join(st.session_state.console_logs[::-1])
                 console_display.code(console_text, language="bash")
-                
                 status_box.info("Status: 🟢 Running / Idle")
                 time.sleep(poll_speed)
 
