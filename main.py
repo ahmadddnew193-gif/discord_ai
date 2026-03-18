@@ -209,8 +209,9 @@ with tab1:
                         is_owner = (owner_id_input and author_id_real == str(owner_id_input))
 
                         if msg_id != latest_message_id:
-                            # --- DIAGNOSTIC LOGGING ---
+                            # --- DEBUG LOGGING AT TOP ---
                             debug_info = f"Bot ID: {my_id} | User ID: {author_id_real}\nIs Owner: {is_owner} | Msg: {content[:20]}...\n"
+                            debug_box.code(debug_info + "🔍 Processing Message...")
                             
                             # 1. OWNER COMMANDS
                             if is_owner and content.lower() == "shutdown":
@@ -220,13 +221,12 @@ with tab1:
                                 st.rerun()
                                 break
 
-                            # 2. ANTI-SELF LOOP
-                            # 2. ANTI-SELF LOOP (Modified to allow manual typing)
-# We only skip if the message matches the EXACT text the AI just sent.
+                            # 2. ANTI-SELF LOOP (Fixed to allow manual typing from the same account)
                             if content == st.session_state.last_ai_content:
                                 debug_box.code(debug_info + "❌ Result: Ignored (Duplicate AI Content)")
                                 latest_message_id = msg_id
                                 continue
+
                             # 3. FILTERS
                             latest_message_id = msg_id 
                             st.session_state.last_activity = time.time()
