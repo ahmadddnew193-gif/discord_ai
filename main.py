@@ -53,11 +53,19 @@ with st.sidebar:
     admin_input = st.text_input("Owner Master Key", type="password", help="Only the owner uses this to generate the session code.")
     
     if admin_input == MASTER_KEY:
-        if st.button("🎲 Generate Global 6-Digit Code"):
-            new_code = str(random.randint(100000, 999999))
-            set_global_code(new_code)
-            st.success(f"ACTIVE CODE: {new_code}")
-            st.info("⚠️ This code is now valid for ALL users for 10 minutes.")
+        col_gen, col_rev = st.columns(2)
+        with col_gen:
+            if st.button("🎲 Generate Code"):
+                new_code = str(random.randint(100000, 999999))
+                set_global_code(new_code)
+                st.success(f"CODE: {new_code}")
+        with col_rev:
+            if st.button("🚫 Revoke All"):
+                if os.path.exists(CODE_FILE):
+                    os.remove(CODE_FILE)
+                st.session_state.access_granted = False
+                st.warning("Access Revoked")
+                st.rerun()
     
     st.divider()
     
@@ -225,7 +233,18 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13
 with tab1:
     col1, col2 = st.columns(2)
     with col1:
-        system_prompt = st.text_area("System Prompt", value="You are a helpful assistant.")
+        # Persona Switcher Feature
+        persona_dict = {
+            "Custom": "",
+            "Helpful Assistant": "You are a helpful and polite assistant.",
+            "Sarcastic Bot": "You are a sarcastic, witty bot who uses emojis and jokes.",
+            "Technical Support": "You are a highly technical expert who gives concise, direct answers.",
+            "Chaos Mode": "You are a chaotic, unpredictable entity. Keep replies short and weird."
+        }
+        selected_persona = st.selectbox("Preset Personas", list(persona_dict.keys()))
+        
+        default_prompt = persona_dict[selected_persona] if selected_persona != "Custom" else "You are a helpful assistant."
+        system_prompt = st.text_area("System Prompt", value=default_prompt)
         owner_id_input = st.text_input("Owner Discord ID").strip()
     with col2:
         blacklist_input = st.text_area("Blacklisted Keywords", placeholder="spam, help")
