@@ -221,11 +221,12 @@ with tab1:
                                 break
 
                             # 2. ANTI-SELF LOOP
-                            if author_id_real == str(my_id) or content == st.session_state.last_ai_content:
-                                debug_box.code(debug_info + "❌ Result: Ignored (Self-Loop/Duplicate)")
+                            # 2. ANTI-SELF LOOP (Modified to allow manual typing)
+# We only skip if the message matches the EXACT text the AI just sent.
+                            if content == st.session_state.last_ai_content:
+                                debug_box.code(debug_info + "❌ Result: Ignored (Duplicate AI Content)")
                                 latest_message_id = msg_id
                                 continue
-
                             # 3. FILTERS
                             latest_message_id = msg_id 
                             st.session_state.last_activity = time.time()
