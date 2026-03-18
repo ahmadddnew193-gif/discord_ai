@@ -8,10 +8,6 @@ from datetime import datetime
 import random
 import pandas as pd
 import base64
-from concurrent.futures import ThreadPoolExecutor
-
-# Initialize background worker
-executor = ThreadPoolExecutor(max_workers=5)
 
 st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
 st.title("Discord AI Bot & History Scraper")
@@ -84,7 +80,7 @@ def safety_filter(text):
     return True
 
 def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input):
-    """Handles AI logic in a separate thread to prevent blocking."""
+    """Handles AI logic synchronously."""
     try:
         author_username = latest['author']['username'].lower()
         content = latest['content'].strip()
@@ -116,7 +112,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             st.session_state.last_ai_content = reply.strip()
             
             requests.post(discord_url, json={"content": reply}, headers=headers)
-            log_to_csv(author_username, content, "Threaded Reply")
+            log_to_csv(author_username, content, "Reply Sent")
     except Exception as e:
         pass
 
@@ -227,9 +223,8 @@ with tab1:
 
                         # --- PROCESS NEW MESSAGE ---
                         if msg_id != latest_message_id:
-                            # ANTI-SELF LOOP: Compare content and LOG to console
-                            if content == st.session_state.last_ai_content:
-                                print(f"[LOG] Ignored self-loop message: \"{content[:30]}...\"")
+                            # FIXED ANTI-SELF LOOP: Check by ID or matching content
+                            if author_id_real == str(my_id) or content == st.session_state.last_ai_content:
                                 latest_message_id = msg_id
                                 continue
 
@@ -245,7 +240,7 @@ with tab1:
                                 st.rerun()
                                 break
 
-                            # 2. FILTER & ASYNC REPLY
+                            # 2. FILTER & SYNC REPLY
                             if author_username in blacklisted_users and not is_owner:
                                 continue
 
@@ -253,8 +248,9 @@ with tab1:
                             is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
                             
                             if is_allowed and not skip_filters:
-                                status_box.warning("Status: 🧠 Background Processing...")
-                                executor.submit(background_reply, latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input)
+                                status_box.warning("Status: 🧠 Processing Reply...")
+                                # Call directly instead of using executor
+                                background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input)
 
                 status_box.info("Status: 🟢 Running / Idle")
                 time.sleep(poll_speed)
