@@ -46,7 +46,7 @@ def get_headers(tk):
     return {
         "Authorization": tk,
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36"
     }
 
 def log_to_csv(author, content, action):
@@ -220,19 +220,35 @@ with tab1:
 
                         # --- PROCESS NEW MESSAGE ---
                         if msg_id != st.session_state.latest_message_id:
+                            # 1. THE "ANTI-SELF" SHIELD
+                            # If the message sender is the bot itself, skip everything.
+                            if author_id_real == str(my_id):
+                                st.session_state.latest_message_id = msg_id
+                                continue
+
                             st.session_state.latest_message_id = msg_id # Update immediately
                             st.session_state.last_activity = time.time()
+                            author_username = latest['author']['username'].lower()
 
-                            # 1. OWNER-ONLY & SHUTDOWN CHECK
-                            if owner_id_input and author_id_real == str(owner_id_input):
+                            # 2. OWNER-ONLY & SHUTDOWN CHECK
+                            is_owner = (owner_id_input and author_id_real == str(owner_id_input))
+                            if is_owner:
                                 if content.lower() == "shutdown":
                                     requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
                                     st.session_state.bot_running = False
                                     st.rerun()
                                     break
                                 
-                                # 2. ASYNC REPLY (Only for owner)
-                                status_box.warning("Status: 🧠 Processing Owner Request...")
+                            # 3. FILTERS (Blacklists and Whitelists)
+                            if author_username in blacklisted_users and not is_owner:
+                                continue
+                            
+                            skip_filters = False if is_owner else any(w in content.lower() for w in blacklist)
+                            is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
+
+                            # 4. TRIGGER REPLY
+                            if is_allowed and not skip_filters:
+                                status_box.warning(f"Status: 🧠 Processing {author_username}...")
                                 executor.submit(background_reply, latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, channel_id_input)
 
                 status_box.info("Status: 🟢 Running / Idle")
