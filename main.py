@@ -223,9 +223,8 @@ with tab1:
                                 st.rerun()
                                 break
 
-                            # --- INTEGRATED INCOMING SAFETY FILTER ---
                             if enable_safety and not safety_filter(content):
-                                debug_box.code(debug_info + "❌ Result: Ignored (Toxic/Harmful Content)")
+                                debug_box.code(debug_info + "❌ Result: Ignored (Toxic Content)")
                                 latest_message_id = msg_id
                                 continue
 
@@ -265,7 +264,6 @@ with tab1:
                 time.sleep(poll_speed)
                 continue
 
-# --- REMAINDER OF TABS (History, Harvester, etc.) UNCHANGED ---
 with tab2:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
@@ -328,10 +326,33 @@ with tab7:
 
 with tab8:
     st.header("🎙️ VC Lurker")
-    v_guild_id = st.text_input("Voice Guild ID")
-    if st.button("Poll VC"):
-        res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=get_headers(token)).json()
-        st.write(res)
+    v_guild_id = st.text_input("Voice Guild ID (Server ID)")
+    if st.button("🔍 Scan All Voice Channels", use_container_width=True):
+        if token and v_guild_id:
+            headers = get_headers(token)
+            # Discord API endpoint for guild voice states
+            res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", headers=headers)
+            
+            if res.status_code == 200:
+                states = res.json()
+                if states:
+                    st.info(f"Found {len(states)} user(s) in voice channels.")
+                    data_list = []
+                    for s in states:
+                        data_list.append({
+                            "User ID": s.get('user_id'),
+                            "Channel ID": s.get('channel_id'),
+                            "Muted": s.get('self_mute'),
+                            "Deafened": s.get('self_deaf'),
+                            "Streaming": s.get('self_video') or s.get('self_stream')
+                        })
+                    st.table(pd.DataFrame(data_list))
+                else:
+                    st.warning("No users currently active in any voice channels in this server.")
+            else:
+                st.error(f"Failed to fetch. Error Code: {res.status_code}. Ensure the ID is correct and you are in the server.")
+        else:
+            st.error("Please provide both your Token and the Guild ID.")
 
 with tab9:
     st.header("✨ HypeSquad Spoofer")
