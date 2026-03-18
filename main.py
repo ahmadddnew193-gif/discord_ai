@@ -75,7 +75,7 @@ def safety_filter(text):
             return False
     return True
 
-def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input):
+def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool):
     try:
         author_username = latest['author']['username'].lower()
         content = latest['content'].strip()
@@ -83,11 +83,16 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         is_owner = str(latest['author']['id']) == str(owner_id_input)
 
         requests.post(typing_url, headers=headers)
-        reaction_emoji = "👑" if is_owner else "💬"
+        
+        # --- FIXED EMOJI LOGIC ---
+        if emoji_pool:
+            reaction_emoji = random.choice(emoji_pool)
+        else:
+            reaction_emoji = "👑" if is_owner else "💬"
+            
         if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
         add_reaction(latest['channel_id'], msg_id, reaction_emoji, headers)
 
-        # PAST MESSAGE CONTEXT LOGIC
         chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
         if isinstance(context_req, list):
@@ -209,11 +214,9 @@ with tab1:
                         is_owner = (owner_id_input and author_id_real == str(owner_id_input))
 
                         if msg_id != latest_message_id:
-                            # --- DEBUG LOGGING AT TOP ---
                             debug_info = f"Bot ID: {my_id} | User ID: {author_id_real}\nIs Owner: {is_owner} | Msg: {content[:20]}...\n"
                             debug_box.code(debug_info + "🔍 Processing Message...")
                             
-                            # 1. OWNER COMMANDS
                             if is_owner and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
                                 log_to_csv(author_username, content, "Shutdown")
@@ -221,13 +224,11 @@ with tab1:
                                 st.rerun()
                                 break
 
-                            # 2. ANTI-SELF LOOP (Fixed to allow manual typing from the same account)
                             if content == st.session_state.last_ai_content:
                                 debug_box.code(debug_info + "❌ Result: Ignored (Duplicate AI Content)")
                                 latest_message_id = msg_id
                                 continue
 
-                            # 3. FILTERS
                             latest_message_id = msg_id 
                             st.session_state.last_activity = time.time()
                             
@@ -249,10 +250,10 @@ with tab1:
                                 debug_box.code(debug_info + "❌ Result: Ignored (Keyword Match)")
                                 continue
 
-                            # 4. SUCCESS - CALLING REPLY
                             debug_box.code(debug_info + "✅ Result: TRIGGERING AI REPLY...")
                             status_box.warning("Status: 🧠 Processing Reply...")
-                            background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input)
+                            # Pass emoji_pool to background_reply
+                            background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool)
 
                 status_box.info("Status: 🟢 Running / Idle")
                 time.sleep(poll_speed)
@@ -260,7 +261,7 @@ with tab1:
                 time.sleep(poll_speed)
                 continue
 
-# --- TABS 2-14 REMAIN UNCHANGED ---
+# --- REMAINDER OF TABS (History, Harvester, etc.) UNCHANGED ---
 with tab2:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
