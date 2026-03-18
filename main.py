@@ -29,17 +29,14 @@ if "last_activity" not in st.session_state:
     st.session_state.last_activity = time.time()
 if "typing_active" not in st.session_state:
     st.session_state.typing_active = False
-# Track last AI content to prevent self-loops
 if "last_ai_content" not in st.session_state:
     st.session_state.last_ai_content = None
 
 # --- Helper Functions ---
 def jitter_delay(min_s=0.1, max_s=0.5):
-    """Reduced jitter for faster performance while staying 'safe'."""
     time.sleep(random.uniform(min_s, max_s))
 
 def get_headers(tk):
-    """Returns human-like headers."""
     return {
         "Authorization": tk,
         "Content-Type": "application/json",
@@ -72,7 +69,6 @@ def add_reaction(channel_id, message_id, emoji, headers):
     requests.put(url, headers=headers)
 
 def safety_filter(text):
-    """Checks for toxic or harmful content before sending."""
     harmful_terms = ["self-harm", "suicide", "kys", "kill yourself", "harming myself"]
     for term in harmful_terms:
         if term in text.lower():
@@ -80,20 +76,17 @@ def safety_filter(text):
     return True
 
 def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input):
-    """Handles AI logic synchronously."""
     try:
         author_username = latest['author']['username'].lower()
         content = latest['content'].strip()
         msg_id = latest['id']
         is_owner = str(latest['author']['id']) == str(owner_id_input)
 
-        # 1. Feedback
         requests.post(typing_url, headers=headers)
         reaction_emoji = "👑" if is_owner else "💬"
         if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
         add_reaction(latest['channel_id'], msg_id, reaction_emoji, headers)
 
-        # 2. Context
         chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}"}]
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
         if isinstance(context_req, list):
@@ -101,16 +94,12 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
                 role = "assistant" if str(m['author']['id']) == str(my_id) else "user"
                 chat_history.append({"role": role, "content": m['content']})
 
-        # 3. AI
         response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
         reply = response.choices[0].message.content
         
         if not enable_safety or safety_filter(reply):
             if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
-            
-            # Update state before sending to ensure loop catches the content
             st.session_state.last_ai_content = reply.strip()
-            
             requests.post(discord_url, json={"content": reply}, headers=headers)
             log_to_csv(author_username, content, "Reply Sent")
     except Exception as e:
@@ -120,7 +109,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
 with st.sidebar:
     st.header("🔑 Authentication")
     token = st.text_input("Discord Token", type="password")
-    
     if token:
         is_valid, user_info = validate_token(token)
         if is_valid:
@@ -137,10 +125,8 @@ with st.sidebar:
 
     or_key = st.text_input("OpenRouter API Key", type="password")
     channel_id_input = st.text_input("Channel ID")
-    
     st.divider()
     st.header("⚙️ Bot Settings")
-    
     if st.session_state.bot_running:
         st.markdown("### 📡 Connection Status")
         status_box = st.empty()
@@ -151,7 +137,6 @@ with st.sidebar:
     resp_delay = st.slider("Response Delay (Seconds)", 0.0, 5.0, 0.0)
     reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=5, value=0)
     enable_safety = st.toggle("Enable Safety Filter", value=True)
-    
     emoji_pool_raw = st.text_input("Custom Emoji Pool", placeholder="🔥,💀,✅,🧠")
     emoji_pool = [e.strip() for e in emoji_pool_raw.split(",") if e.strip()]
 
@@ -173,6 +158,7 @@ with tab1:
         allowed_input = st.text_input("Allowed Users", value="everyone")
         blacklisted_users_input = st.text_input("Blacklisted Users", placeholder="annoying_user1, troll_user2")
 
+    # Allowed users can now be usernames or numerical IDs
     allowed_users = "everyone" if allowed_input.lower().strip() == "everyone" else [u.strip().lower() for u in allowed_input.split(",") if u.strip()]
     blacklisted_users = [u.strip().lower() for u in blacklisted_users_input.split(",") if u.strip()]
     blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
@@ -192,12 +178,14 @@ with tab1:
 
     st.subheader("📊 Live Audit Log")
     log_display = st.empty()
+    st.divider()
+    st.subheader("🛠️ Debug Console")
+    debug_box = st.empty()
 
     if st.session_state.bot_running:
         headers = get_headers(token)
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
-        
         init_r = requests.get(discord_url, headers=headers)
         latest_message_id = init_r.json()[0]['id'] if init_r.status_code == 200 and init_r.json() else None
         
@@ -218,21 +206,13 @@ with tab1:
                         author_id_real = str(latest['author']['id'])
                         content = latest['content'].strip()
                         msg_id = latest['id']
-
                         is_owner = (owner_id_input and author_id_real == str(owner_id_input))
 
-                        # --- PROCESS NEW MESSAGE ---
+                        # Updated Debug Console
+                        debug_box.code(f"Current Bot ID: {my_id}\nDetected User ID: {author_id_real}\nIs Owner: {is_owner}\nMessage: {content[:30]}")
+
                         if msg_id != latest_message_id:
-                            # FIXED ANTI-SELF LOOP: Check by ID or matching content
-                            if author_id_real == str(my_id) or content == st.session_state.last_ai_content:
-                                latest_message_id = msg_id
-                                continue
-
-                            status_box.warning("Status: ⚡ Triggered!")
-                            latest_message_id = msg_id 
-                            st.session_state.last_activity = time.time()
-
-                            # 1. SHUTDOWN
+                            # 1. OWNER COMMANDS (Priority check - before self-loop check)
                             if is_owner and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
                                 log_to_csv(author_username, content, "Shutdown")
@@ -240,21 +220,30 @@ with tab1:
                                 st.rerun()
                                 break
 
-                            # 2. FILTER & SYNC REPLY
-                            if author_username in blacklisted_users and not is_owner:
+                            # 2. ANTI-SELF LOOP (Prevent the AI from talking to itself)
+                            if author_id_real == str(my_id) or content == st.session_state.last_ai_content:
+                                latest_message_id = msg_id
+                                continue
+
+                            # 3. FILTERS & ALLOWED USERS (Checked by Username or ID)
+                            latest_message_id = msg_id 
+                            st.session_state.last_activity = time.time()
+                            
+                            if (author_username in blacklisted_users or author_id_real in blacklisted_users) and not is_owner:
                                 continue
 
                             skip_filters = False if is_owner else any(w in content.lower() for w in blacklist)
-                            is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
+                            is_allowed = (allowed_users == "everyone" or 
+                                         author_username in allowed_users or 
+                                         author_id_real in allowed_users or 
+                                         is_owner)
                             
                             if is_allowed and not skip_filters:
                                 status_box.warning("Status: 🧠 Processing Reply...")
-                                # Call directly instead of using executor
                                 background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input)
 
                 status_box.info("Status: 🟢 Running / Idle")
                 time.sleep(poll_speed)
-
             except Exception as e:
                 time.sleep(poll_speed)
                 continue
@@ -380,13 +369,10 @@ with tab13:
 
 with tab14:
     st.header("⏳ Infinite Typing Indicator")
-    type_col1, type_col2 = st.columns(2)
-    with type_col1:
-        if st.button("🚀 Start Infinite Typing", use_container_width=True):
-            st.session_state.typing_active = True
-    with type_col2:
-        if st.button("🛑 Stop Typing", use_container_width=True):
-            st.session_state.typing_active = False
+    if st.button("🚀 Start Infinite Typing", use_container_width=True):
+        st.session_state.typing_active = True
+    if st.button("🛑 Stop Typing", use_container_width=True):
+        st.session_state.typing_active = False
     if st.session_state.typing_active:
         h = get_headers(token)
         t_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
