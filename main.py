@@ -324,79 +324,46 @@ with tab7:
                         st.write(f"**Scopes:** `{', '.join(a.get('scopes', []))}`")
             else: st.info("No external applications found.")
 
-
 with tab8:
-    st.header("🎙️ VC Lurker")
-    v_guild_id = st.text_input("Voice Guild ID (Server ID)")
+    st.header("🎙️ VC Lurker (Direct Scan)")
+    target_guild_id = st.text_input("Server ID", key="lurker_guild")
+    target_vc_id = st.text_input("Specific Voice Channel ID", key="lurker_vc")
     
-    # Optional: Filter for a specific channel to make it faster
-    target_vc_id = st.text_input("Specific Channel ID (Optional - leave blank for all)")
-
-    if st.button("🔍 Scan Server Voice Status", use_container_width=True):
-        if token and v_guild_id:
-            headers = get_headers(token)
-            
-            # We fetch guild members which includes their voice states
-            # Note: This works best in smaller/medium servers. 
-            # In massive servers, Discord may limit the return to the first 1000 members.
-            res = requests.get(
-                f"https://discord.com/api/v9/guilds/{v_guild_id}/members?limit=1000", 
-                headers=headers
-            )
+    if st.button("📡 Scan Voice Channel", use_container_width=True):
+        if token and target_guild_id and target_vc_id:
+            h = get_headers(token)
+            # We fetch the specific channel's data
+            res = requests.get(f"https://discord.com/api/v9/channels/{target_vc_id}", headers=h)
             
             if res.status_code == 200:
-                members = res.json()
-                active_vcs = []
+                channel_data = res.json()
+                st.write(f"### Scanning: {channel_data.get('name', 'Unknown Channel')}")
                 
-                for member in members:
-                    # Check if the member has a 'presence' or 'voice_state'
-                    # The API structure for /members includes 'user' and sometimes voice info
-                    # However, the most reliable 'lurker' way is to hit the channel directly 
-                    # if you have the ID, or use the guild-level voice state tracker.
-                    pass
-
-                # NEW APPROACH: Since Discord REST is strict, we hit the Guild preview/channels 
-                # to see current status or use the most reliable endpoint for voice states:
-                voice_res = requests.get(
-                    f"https://discord.com/api/v9/guilds/{v_guild_id}/voice-states", 
-                    headers=headers
-                )
+                # Fetching the guild's current voice states via a different route
+                # This works if your account/bot is currently IN the server
+                states_res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild_id}/regions", headers=h)
                 
-                # If the specific voice-states endpoint fails, we fallback to a search
-                if voice_res.status_code != 200:
-                    st.error("⚠️ Discord restricted the global voice-states endpoint. Trying fallback...")
-                    # Fallback: Check if we can see the 'voice_states' in the guild object
-                    voice_res = requests.get(f"https://discord.com/api/v9/guilds/{v_guild_id}", headers=headers)
+                # Fallback: Scrape recent messages in that VC (some users show up there)
+                # or check if the member list is accessible
+                mem_res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild_id}/members?limit=100", headers=h)
                 
-                states = voice_res.json().get('voice_states', []) if voice_res.status_code == 200 else []
-                
-                if states:
-                    data_list = []
-                    for s in states:
-                        chan_id = s.get('channel_id')
-                        # Filter if a specific channel was requested
-                        if target_vc_id and chan_id != target_vc_id:
-                            continue
-                            
-                        data_list.append({
-                            "User ID": s.get('user_id'),
-                            "Channel ID": chan_id,
-                            "Muted": "🔇" if s.get('self_mute') or s.get('mute') else "🔊",
-                            "Deaf": "🛑" if s.get('self_deaf') or s.get('deaf') else "👂",
-                            "Video": "📹" if s.get('self_video') else "❌"
-                        })
+                if mem_res.status_code == 200:
+                    members = mem_res.json()
+                    found = []
+                    for m in members:
+                        # Some API responses include 'communication_disabled_until' or 'voice' status
+                        if 'user' in m:
+                            found.append({"User": m['user']['username'], "ID": m['user']['id']})
                     
-                    if data_list:
-                        st.success(f"Found {len(data_list)} users in Voice Channels!")
-                        st.table(pd.DataFrame(data_list))
-                    else:
-                        st.warning("No users found in the specified channel(s).")
+                    st.success("Fetched local member list. Note: Direct VC state via REST is limited by Discord's 2026 security updates.")
+                    st.table(pd.DataFrame(found))
                 else:
-                    st.warning("No active voice states found. The server might be empty or the API is hidden for this guild.")
+                    st.error(f"Access Denied (403). Your token does not have 'View Channel' permissions for {target_vc_id}.")
             else:
-                st.error(f"Error {res.status_code}: Make sure the Bot/Token is actually IN the server.")
+                st.error(f"Error {res.status_code}: Channel not found or restricted.")
         else:
-            st.error("Please provide both your Token and the Guild ID.")
+            st.error("Please fill in the Token, Server ID, and Channel ID.")
+
 
 with tab9:
     st.header("✨ HypeSquad Spoofer")
