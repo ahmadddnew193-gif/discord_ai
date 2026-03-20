@@ -163,13 +163,14 @@ def safety_filter(text):
     return True
 
 # --- REWRITTEN BACKGROUND REPLY WITH CONTEXTUAL MEMORY ---
-def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool):
+def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool, status_ui):
     try:
         author_username = latest['author']['username'].lower()
         content = latest['content'].strip()
         msg_id = latest['id']
         is_owner = str(latest['author']['id']) == str(owner_id_input)
 
+        status_ui.warning(f"🤔 Thinking: Replying to {author_username}...")
         requests.post(typing_url, headers=headers)
         
         if emoji_pool:
@@ -180,7 +181,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
         add_reaction(latest['channel_id'], msg_id, reaction_emoji, headers)
 
-        # Build dynamic context from channel history
         chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}. Your username is {my_username}."}]
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
         
@@ -224,10 +224,13 @@ with st.sidebar:
     channel_id_input = st.text_input("Channel ID")
     st.divider()
     st.header("⚙️ Bot Settings")
+    
+    # STATUS PLACEHOLDER
+    status_box = st.empty()
     if st.session_state.bot_running:
-        st.markdown("### 📡 Connection Status")
-        status_box = st.empty()
         status_box.info("Status: 🟢 Running / Idle")
+    else:
+        status_box.info("Status: ⚪ Offline")
     
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
     poll_speed = st.slider("Polling Frequency (Seconds)", 0.1, 5.0, 1.0)
@@ -297,9 +300,15 @@ with tab1:
     st.divider()
     
     # --- TERMINAL CONSOLE ---
-    st.subheader("🖥️ System Console")
-    console_text = "\n".join(st.session_state.console_logs) if st.session_state.console_logs else "Terminal ready..."
-    st.code(console_text, language="bash")
+    t_col1, t_col2 = st.columns([0.8, 0.2])
+    with t_col1:
+        st.subheader("🖥️ System Console")
+    with t_col2:
+        if st.button("🗑️ Clear Console", use_container_width=True):
+            st.session_state.console_logs = []
+            st.rerun()
+            
+    console_display = st.empty()
     
     st.divider()
     st.subheader("🛠️ Debug Console")
@@ -309,11 +318,16 @@ with tab1:
         headers = get_headers(token)
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
+        
         init_r = requests.get(discord_url, headers=headers)
         latest_message_id = init_r.json()[0]['id'] if init_r.status_code == 200 and init_r.json() else None
         
         while st.session_state.bot_running:
             try:
+                # DYNAMIC UPDATE SECTION
+                console_text = "\n".join(st.session_state.console_logs) if st.session_state.console_logs else "Listening..."
+                console_display.code(console_text, language="bash")
+                
                 if os.path.isfile('discord_audit_log.csv'):
                     df_log = pd.read_csv('discord_audit_log.csv').tail(10)
                     log_display.table(df_log)
@@ -348,12 +362,15 @@ with tab1:
                                 add_console_log(f"Ignored: User {author_username} not allowed.")
                                 continue
                                 
-                            background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool)
+                            background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool, status_box)
+                            status_box.info("Status: 🟢 Running / Idle")
 
                 time.sleep(poll_speed)
             except Exception as e:
-                add_console_log(f"Error in Loop: {str(e)}")
+                debug_box.error(f"Error in Loop: {str(e)}")
                 time.sleep(poll_speed)
+    else:
+        console_display.code("\n".join(st.session_state.console_logs) if st.session_state.console_logs else "Terminal ready...", language="bash")
 
 # --- TAB 2: HISTORY SCRAPER ---
 with tab2:
