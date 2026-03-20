@@ -35,9 +35,19 @@ def log_access_event():
     with open("access_log.txt", "a") as f:
         f.write(f"Access Granted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
+def add_console_log(entry):
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    if "console_logs" not in st.session_state:
+        st.session_state.console_logs = []
+    st.session_state.console_logs.append(f"[{timestamp}] {entry}")
+    if len(st.session_state.console_logs) > 15:
+        st.session_state.console_logs.pop(0)
+
 # Initialize local session state
 if "access_granted" not in st.session_state:
     st.session_state.access_granted = False
+if "console_logs" not in st.session_state:
+    st.session_state.console_logs = []
 
 # Self-destruct logic
 shared_code, shared_time = get_global_code()
@@ -175,11 +185,8 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
         
         if isinstance(context_req, list):
-            # Sort messages oldest to newest
             for m in reversed(context_req):
-                # Determine role based on ID
                 role = "assistant" if str(m['author']['id']) == str(my_id) else "user"
-                # Include sender name in context for better tracking
                 sender = f"[{m['author']['username']}]: " if role == "user" else ""
                 chat_history.append({"role": role, "content": f"{sender}{m['content']}"})
 
@@ -191,8 +198,9 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             st.session_state.last_ai_content = reply.strip()
             requests.post(discord_url, json={"content": reply}, headers=headers)
             log_to_csv(author_username, content, "Reply Sent")
-    except Exception:
-        pass
+            add_console_log(f"Replied to {author_username}: {reply[:30]}...")
+    except Exception as e:
+        add_console_log(f"AI Error: {str(e)}")
 
 # --- Sidebar Bot Settings ---
 with st.sidebar:
@@ -229,6 +237,13 @@ with st.sidebar:
     emoji_pool_raw = st.text_input("Custom Emoji Pool", placeholder="🔥,💀,✅,🧠")
     emoji_pool = [e.strip() for e in emoji_pool_raw.split(",") if e.strip()]
 
+    st.divider()
+    st.header("🚨 Emergency")
+    if st.button("🔴 PANIC BUTTON", use_container_width=True):
+        st.session_state.bot_running = False
+        add_console_log("CRITICAL: Panic sequence initiated. System stopped.")
+        st.rerun()
+
 # --- Tabs ---
 tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13, tab14 = st.tabs([
     "🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester", 
@@ -240,20 +255,18 @@ tab1, tab2, tab3, tab4, tab5, tab6, tab7, tab8, tab9, tab10, tab11, tab12, tab13
 with tab1:
     col1, col2 = st.columns(2)
     with col1:
-        # EXPANDED PERSONA DICTIONARY
         persona_dict = {
             "Custom": "",
             "Helpful Assistant": "You are a helpful and polite assistant.",
-            "Sarcastic Bot": "You are a sarcastic, witty bot who uses emojis and jokes. You find most questions silly.",
-            "Technical Support": "You are a highly technical expert. Give concise, direct answers with documentation style.",
-            "Chaos Mode": "You are a chaotic, unpredictable entity. Keep replies short and weird.",
-            "Cyberpunk Hacker": "You are a Netrunner. Use lingo like 'breaching', 'uplink', and 'mainframe'. You speak in a digital, edgy tone.",
-            "Stoic Philosopher": "You are a philosopher like Marcus Aurelius. Your answers are calm, logical, and focused on virtue.",
-            "Gamer Streamer": "You are a hyped up streamer. Use words like 'POG', 'L', 'W', and 'sus'. Constantly refer to your chat.",
-            "The Detective": "You speak like a character from a Noir film. Everything is a mystery and you are investigating the user."
+            "Sarcastic Bot": "You are a sarcastic, witty bot who uses emojis and jokes.",
+            "Technical Support": "You are a highly technical expert. Concise answers.",
+            "Chaos Mode": "You are a chaotic entity. Short and weird.",
+            "Cyberpunk Hacker": "You are a Netrunner. Digital, edgy tone.",
+            "Stoic Philosopher": "You are a philosopher. Calm and logical.",
+            "Gamer Streamer": "You are a hyped up streamer. Use POG, L, W.",
+            "The Detective": "Noir film character. Investigation mode."
         }
         selected_persona = st.selectbox("Preset Personas", list(persona_dict.keys()))
-        
         default_prompt = persona_dict[selected_persona] if selected_persona != "Custom" else "You are a helpful assistant."
         system_prompt = st.text_area("System Prompt", value=default_prompt)
         owner_id_input = st.text_input("Owner Discord ID").strip()
@@ -271,16 +284,23 @@ with tab1:
     with c1:
         if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
             st.session_state.bot_running = True
-            st.session_state.last_activity = time.time()
-            st.session_state.last_ai_content = None 
+            add_console_log("System Online. Starting listener...")
             st.rerun()
     with c2:
         if st.button("🛑 Stop Bot", use_container_width=True):
             st.session_state.bot_running = False
+            add_console_log("System Offline.")
             st.rerun()
 
     st.subheader("📊 Live Audit Log")
     log_display = st.empty()
+    st.divider()
+    
+    # --- TERMINAL CONSOLE ---
+    st.subheader("🖥️ System Console")
+    console_text = "\n".join(st.session_state.console_logs) if st.session_state.console_logs else "Terminal ready..."
+    st.code(console_text, language="bash")
+    
     st.divider()
     st.subheader("🛠️ Debug Console")
     debug_box = st.empty()
@@ -298,9 +318,7 @@ with tab1:
                     df_log = pd.read_csv('discord_audit_log.csv').tail(10)
                     log_display.table(df_log)
 
-                status_box.info("Status: 🔍 Detecting...")
                 r = requests.get(discord_url, headers=headers, timeout=5)
-                
                 if r.status_code == 200:
                     msgs = r.json()
                     if msgs and isinstance(msgs, list):
@@ -312,57 +330,32 @@ with tab1:
                         is_owner = (owner_id_input and author_id_real == str(owner_id_input))
 
                         if msg_id != latest_message_id:
-                            debug_info = f"Bot ID: {my_id} | User ID: {author_id_real}\nIs Owner: {is_owner} | Msg: {content[:20]}...\n"
-                            debug_box.code(debug_info + "🔍 Processing Message...")
+                            add_console_log(f"Detected: {author_username} -> {content[:20]}...")
+                            latest_message_id = msg_id 
                             
                             if is_owner and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
-                                log_to_csv(author_username, content, "Shutdown")
                                 st.session_state.bot_running = False
                                 st.rerun()
                                 break
 
                             if enable_safety and not safety_filter(content):
-                                debug_box.code(debug_info + "❌ Result: Ignored (Toxic Content)")
-                                latest_message_id = msg_id
+                                add_console_log("Safety: Harmful content ignored.")
                                 continue
 
-                            if content == st.session_state.last_ai_content:
-                                debug_box.code(debug_info + "❌ Result: Ignored (Duplicate AI Content)")
-                                latest_message_id = msg_id
-                                continue
-
-                            latest_message_id = msg_id 
-                            st.session_state.last_activity = time.time()
-                            
-                            if (author_username in blacklisted_users or author_id_real in blacklisted_users) and not is_owner:
-                                debug_box.code(debug_info + "❌ Result: Ignored (User Blacklisted)")
-                                continue
-
-                            skip_filters = False if is_owner else any(w in content.lower() for w in blacklist if w)
-                            is_allowed = (allowed_users == "everyone" or 
-                                           author_username in allowed_users or 
-                                           author_id_real in allowed_users or 
-                                           is_owner)
-                            
+                            is_allowed = (allowed_users == "everyone" or author_username in allowed_users or author_id_real in allowed_users or is_owner)
                             if not is_allowed:
-                                debug_box.code(debug_info + "❌ Result: Ignored (Not in Allowed List)")
+                                add_console_log(f"Ignored: User {author_username} not allowed.")
                                 continue
                                 
-                            if skip_filters:
-                                debug_box.code(debug_info + "❌ Result: Ignored (Keyword Match)")
-                                continue
-
-                            debug_box.code(debug_info + "✅ Result: TRIGGERING AI REPLY...")
-                            status_box.warning("Status: 🧠 Processing Reply...")
                             background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool)
 
-                status_box.info("Status: 🟢 Running / Idle")
                 time.sleep(poll_speed)
-            except Exception:
+            except Exception as e:
+                add_console_log(f"Error in Loop: {str(e)}")
                 time.sleep(poll_speed)
-                continue
 
+# --- TAB 2: HISTORY SCRAPER ---
 with tab2:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
@@ -372,12 +365,14 @@ with tab2:
         if res.status_code == 200:
             st.dataframe(pd.DataFrame([{"Author": m['author']['username'], "Content": m['content']} for m in res.json()]))
 
+# --- TAB 3: DM MEMORY ---
 with tab3:
     st.header("🧠 DM Memory")
     if st.button("Clear Cache"):
         st.session_state.processed_dms = set()
         st.success("Cleared.")
 
+# --- TAB 4: SERVER HARVESTER ---
 with tab4:
     st.header("🌾 Server Harvester")
     target_guild = st.text_input("Target Server ID")
@@ -388,6 +383,7 @@ with tab4:
                 url = f"https://cdn.discordapp.com/emojis/{e['id']}.png"
                 st.image(url, width=64, caption=f"{e['name']} (ID: {e['id']})")
 
+# --- TAB 5: EMOJI SPOOFER ---
 with tab5:
     st.header("💎 Nitro-Free Emoji Spoofer")
     target_ch = st.text_input("Target Channel ID", value=channel_id_input, key="emoji_ch")
@@ -400,6 +396,7 @@ with tab5:
             requests.post(f"https://discord.com/api/v9/channels/{target_ch}/messages", headers=get_headers(token), json={"content": emoji_url})
             st.success("Emoji Sent!")
 
+# --- TAB 6: SNOWFLAKE DECODER ---
 with tab6:
     st.header("❄️ Snowflake Age Decoder")
     input_id = st.text_input("Enter User or Server ID")
@@ -408,8 +405,8 @@ with tab6:
             timestamp = (int(input_id) >> 22) + 1420070400000
             date_obj = datetime.fromtimestamp(timestamp / 1000.0)
             st.success(f"Creation Date: **{date_obj.strftime('%Y-%m-%d %H:%M:%S')} UTC**")
-        else: st.error("Please enter a valid numeric ID.")
 
+# --- TAB 7: APP HUNTER ---
 with tab7:
     st.header("📱 Authorized App Hunter")
     if st.button("🔍 Scan Applications", use_container_width=True):
@@ -421,38 +418,23 @@ with tab7:
                     with st.expander(f"📲 {app_name}"):
                         st.write(f"**Description:** {a.get('application', {}).get('description')}")
                         st.write(f"**Scopes:** `{', '.join(a.get('scopes', []))}`")
-            else: st.info("No external applications found.")
 
+# --- TAB 8: VC LURKER ---
 with tab8:
     st.header("🎙️ VC Lurker (Direct Scan)")
     target_guild_id = st.text_input("Server ID", key="lurker_guild")
     target_vc_id = st.text_input("Specific Voice Channel ID", key="lurker_vc")
-    
     if st.button("📡 Scan Voice Channel", use_container_width=True):
         if token and target_guild_id and target_vc_id:
-            h = get_headers(token)
-            res = requests.get(f"https://discord.com/api/v9/channels/{target_vc_id}", headers=h)
-            
+            res = requests.get(f"https://discord.com/api/v9/channels/{target_vc_id}", headers=get_headers(token))
             if res.status_code == 200:
-                channel_data = res.json()
-                st.write(f"### Scanning: {channel_data.get('name', 'Unknown Channel')}")
-                mem_res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild_id}/members?limit=100", headers=h)
-                
+                st.write(f"### Scanning: {res.json().get('name')}")
+                mem_res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild_id}/members?limit=100", headers=get_headers(token))
                 if mem_res.status_code == 200:
-                    members = mem_res.json()
-                    found = []
-                    for m in members:
-                        if 'user' in m:
-                            found.append({"User": m['user']['username'], "ID": m['user']['id']})
-                    st.success("Fetched local member list.")
+                    found = [{"User": m['user']['username'], "ID": m['user']['id']} for m in mem_res.json() if 'user' in m]
                     st.table(pd.DataFrame(found))
-                else:
-                    st.error(f"Access Denied (403).")
-            else:
-                st.error(f"Error {res.status_code}")
-        else:
-            st.error("Please fill in the Token, Server ID, and Channel ID.")
 
+# --- TAB 9: HYPESQUAD ---
 with tab9:
     st.header("✨ HypeSquad Spoofer")
     house = st.selectbox("House", ["Bravery", "Brilliance", "Balance"])
@@ -461,12 +443,14 @@ with tab9:
         requests.post("https://discord.com/api/v9/hypesquad/online", headers=get_headers(token), json={"house_id": house_map[house]})
         st.success("House Applied")
 
+# --- TAB 10: AUDITOR ---
 with tab10:
     st.header("🔍 Account Auditor")
     if st.button("Run Audit"):
         u_res = requests.get("https://discord.com/api/v9/users/@me", headers=get_headers(token)).json()
         st.json(u_res)
 
+# --- TAB 11: WEBHOOK ---
 with tab11:
     st.header("📢 Webhook Commander")
     wh_url = st.text_input("Webhook URL")
@@ -475,24 +459,23 @@ with tab11:
         requests.post(wh_url, json={"content": wh_msg})
         st.success("Sent")
 
+# --- TAB 12: GHOSTER ---
 with tab12:
     st.header("👻 Message Ghoster")
     ghost_ch = st.text_input("Target Channel ID", value=channel_id_input, key="ghost_ch")
     ghost_limit = st.number_input("Scan Limit", min_value=1, max_value=500, value=50)
-    ghost_keyword = st.text_input("Keyword Filter (Optional)")
     if st.button("🔥 Purge My Messages", use_container_width=True):
         if my_id:
-            h = get_headers(token)
-            msgs = requests.get(f"https://discord.com/api/v9/channels/{ghost_ch}/messages?limit={ghost_limit}", headers=h).json()
+            msgs = requests.get(f"https://discord.com/api/v9/channels/{ghost_ch}/messages?limit={ghost_limit}", headers=get_headers(token)).json()
             count = 0
             for m in msgs:
                 if m['author']['id'] == my_id:
-                    if not ghost_keyword or ghost_keyword.lower() in m['content'].lower():
-                        requests.delete(f"https://discord.com/api/v9/channels/{ghost_ch}/messages/{m['id']}", headers=h)
-                        count += 1
-                        time.sleep(1.2)
+                    requests.delete(f"https://discord.com/api/v9/channels/{ghost_ch}/messages/{m['id']}", headers=get_headers(token))
+                    count += 1
+                    time.sleep(1.2)
             st.success(f"Ghosted {count} messages.")
 
+# --- TAB 13: ANSI COLOR ---
 with tab13:
     st.header("🎨 ANSI Color Painter")
     color_text = st.text_input("Your Message")
@@ -504,6 +487,7 @@ with tab13:
         requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload})
         st.success("Colored Message Sent!")
 
+# --- TAB 14: TYPING ---
 with tab14:
     st.header("⏳ Infinite Typing Indicator")
     if st.button("🚀 Start Infinite Typing", use_container_width=True):
@@ -511,10 +495,9 @@ with tab14:
     if st.button("🛑 Stop Typing", use_container_width=True):
         st.session_state.typing_active = False
     if st.session_state.typing_active:
-        h = get_headers(token)
         t_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
         while st.session_state.typing_active:
-            res = requests.post(t_url, headers=h)
+            res = requests.post(t_url, headers=get_headers(token))
             if res.status_code != 204:
                 st.session_state.typing_active = False
                 break
