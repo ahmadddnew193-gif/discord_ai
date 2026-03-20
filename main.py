@@ -111,7 +111,7 @@ if not st.session_state.access_granted:
     st.stop() 
 
 # --- START OF ORIGINAL CODE ---
-st.title("Discord AI Bot & History Scraper")
+st.title("Discord AI Bot & Vision Engine")
 
 # --- Initialize Session State ---
 for key, val in {
@@ -119,7 +119,8 @@ for key, val in {
     "memory": {}, "processed_dms": set(), "last_webhook_token": None,
     "last_activity": time.time(), "typing_active": False,
     "last_ai_content": None, "bot_start_time": time.time(),
-    "last_msg_id": None, "debug_log": "System Ready..."
+    "last_msg_id": None, "debug_log": "System Ready...",
+    "current_vision_url": None
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -167,7 +168,14 @@ def safety_filter(text):
             return False
     return True
 
-# --- UPDATED BACKGROUND REPLY ---
+# --- VISION HELPER ---
+def encode_image_from_url(url):
+    try:
+        response = requests.get(url)
+        return base64.b64encode(response.content).decode('utf-8')
+    except: return None
+
+# --- UPDATED BACKGROUND REPLY WITH VISION ---
 def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool):
     try:
         channel_id = latest['channel_id']
@@ -186,13 +194,17 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
         add_reaction(channel_id, msg_id, reaction_emoji, headers)
 
-        long_term_mem = load_memory(channel_id)
-        urls = re.findall(r'(https?://[^\s]+)', content)
-        url_context = ""
-        if urls:
-            url_context = f"\n[SYSTEM NOTE: The user provided a link: {urls[0]}. If it's a known site, discuss its likely content.]"
+        # Vision Scan
+        image_b64 = None
+        if latest.get('attachments'):
+            for attach in latest['attachments']:
+                if any(attach['filename'].lower().endswith(ext) for ext in ['.png', '.jpg', '.jpeg', '.webp']):
+                    st.session_state.current_vision_url = attach['url']
+                    image_b64 = encode_image_from_url(attach['url'])
+                    break
 
-        chat_history = [{"role": "system", "content": f"PERSONA: {system_prompt}. Current memory: {long_term_mem}. {url_context}"}]
+        long_term_mem = load_memory(channel_id)
+        chat_history = [{"role": "system", "content": f"PERSONA: {system_prompt}. Current memory: {long_term_mem}"}]
         
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
         
@@ -201,6 +213,16 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
                 role = "assistant" if str(m['author']['id']) == str(my_id) else "user"
                 sender = f"[{m['author']['username']}]: " if role == "user" else ""
                 chat_history.append({"role": role, "content": f"{sender}{m['content']}"})
+
+        # Multimodal payload if image exists
+        if image_b64:
+            chat_history[-1] = {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": f"[{author_username}]: {content or 'What is in this image?'}"},
+                    {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"}}
+                ]
+            }
 
         response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
         reply = response.choices[0].message.content
@@ -213,7 +235,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
             st.session_state.last_ai_content = reply.strip()
             requests.post(discord_url, json={"content": reply}, headers=headers)
-            log_to_csv(author_username, content, "Reply Sent")
+            log_to_csv(author_username, content, "Vision/Text Reply Sent")
             return True
     except Exception as e:
         st.session_state.debug_log = f"Error: {str(e)}"
@@ -240,10 +262,9 @@ with st.sidebar:
     st.divider()
     st.header("⚙️ Bot Settings")
     
-    # Heartbeat Indicator
     if st.session_state.bot_running:
         hb = "🟢" if int(time.time()) % 2 == 0 else "⚪"
-        st.markdown(f"### {hb} Connection Status")
+        st.markdown(f"### {hb} Vision Active")
         status_box = st.empty()
     
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
@@ -273,23 +294,26 @@ with tab1:
     with col1:
         persona_dict = {
             "Custom": "",
-            "Helpful Assistant": "You are a helpful assistant.",
+            "Vision Assistant": "You are an AI with vision. Describe images accurately and help users.",
             "Sarcastic Bot": "You are a sarcastic, witty bot.",
             "Technical Support": "You are a technical expert.",
-            "Chaos Mode": "Short and weird replies.",
             "Cyberpunk Hacker": "Netrunner persona.",
-            "Stoic Philosopher": "Calm and logical.",
-            "Gamer Streamer": "Hype, POG, L, W.",
-            "The Detective": "Noir film character."
+            "Stoic Philosopher": "Calm and logical."
         }
         selected_persona = st.selectbox("Preset Personas", list(persona_dict.keys()))
         default_prompt = persona_dict[selected_persona] if selected_persona != "Custom" else "You are a helpful assistant."
         system_prompt = st.text_area("System Prompt", value=default_prompt)
         owner_id_input = st.text_input("Owner Discord ID").strip()
     with col2:
-        blacklist_input = st.text_area("Blacklisted Keywords")
-        allowed_input = st.text_input("Allowed Users", value="everyone")
-        blacklisted_users_input = st.text_input("Blacklisted Users")
+        st.write("🖼️ **Vision Monitor**")
+        if st.session_state.current_vision_url:
+            st.image(st.session_state.current_vision_url, width=250, caption="Last seen by AI")
+        else:
+            st.info("No images detected yet.")
+
+    blacklist_input = st.text_area("Blacklisted Keywords")
+    allowed_input = st.text_input("Allowed Users", value="everyone")
+    blacklisted_users_input = st.text_input("Blacklisted Users")
 
     allowed_users = "everyone" if allowed_input.lower().strip() == "everyone" else [u.strip().lower() for u in allowed_input.split(",") if u.strip()]
     blacklisted_users = [u.strip().lower() for u in blacklisted_users_input.split(",") if u.strip()]
@@ -314,25 +338,21 @@ with tab1:
     st.subheader("🛠️ Debug Console")
     debug_box = st.empty()
 
-    # --- MAIN ENGINE (NON-BLOCKING) ---
     if st.session_state.bot_running:
-        status_box.info("Status: 🟢 ONLINE / IDLE")
+        status_box.info("Status: 🟢 ONLINE / SCANNING")
         headers = get_headers(token)
         discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
         
-        # 1. Update UI Elements
         if os.path.isfile('discord_audit_log.csv'):
             df_log = pd.read_csv('discord_audit_log.csv').tail(10)
             log_display.table(df_log)
         debug_box.code(st.session_state.debug_log)
 
-        # 2. Check Auto-Restart
         if auto_restart_10m and (time.time() - st.session_state.bot_start_time > 600):
             st.session_state.bot_start_time = time.time()
             st.rerun()
 
-        # 3. Detect New Messages
         try:
             r = requests.get(discord_url, headers=headers, timeout=3)
             if r.status_code == 200:
@@ -350,24 +370,22 @@ with tab1:
 
                         st.session_state.debug_log = f"[{datetime.now().strftime('%H:%M:%S')}] Detected: {content[:40]}..."
                         
-                        # Shutdown Command
                         if is_owner and content.lower() == "shutdown":
                             requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
                             st.session_state.bot_running = False
                             st.rerun()
 
-                        # Logic Filter
                         if content != st.session_state.last_ai_content:
                             if not (author_username in blacklisted_users or author_id_real in blacklisted_users):
                                 skip = any(w in content.lower() for w in blacklist if w) if not is_owner else False
                                 allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
                                 
                                 if allowed and not skip:
-                                    status_box.warning("Status: 🧠 AI IS THINKING...")
+                                    status_box.warning("Status: 🧠 AI ANALYZING...")
                                     background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool)
 
             time.sleep(poll_speed)
-            st.rerun() # This keeps the loop active but allows UI to refresh
+            st.rerun() 
         except Exception as e:
             st.session_state.debug_log = f"Poll Error: {str(e)}"
             time.sleep(poll_speed)
@@ -385,7 +403,7 @@ with tab3:
             os.remove(MEMORY_FILE)
         st.success("Memory Nuked.")
 
-# --- REMAINDER OF TABS ---
+# --- REMAINDER OF TABS (SAME AS ORIGINAL) ---
 with tab2:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
