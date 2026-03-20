@@ -8,12 +8,15 @@ from datetime import datetime
 import random
 import pandas as pd
 import base64
+import json
+import re
 
 st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
 
 # --- SECURE LOGIN SYSTEM ---
 MASTER_KEY = st.secrets["MASTER_KEY"]
 CODE_FILE = "active_code.txt"
+MEMORY_FILE = "conversation_memory.json"
 
 # --- GLOBAL ACCESS FUNCTIONS ---
 def set_global_code(code):
@@ -34,6 +37,23 @@ def get_global_code():
 def log_access_event():
     with open("access_log.txt", "a") as f:
         f.write(f"Access Granted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
+# --- MEMORY PERSISTENCE FUNCTIONS ---
+def save_memory(channel_id, summary):
+    memory_data = {}
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            memory_data = json.load(f)
+    memory_data[str(channel_id)] = {"summary": summary, "last_updated": time.time()}
+    with open(MEMORY_FILE, "w") as f:
+        json.dump(memory_data, f)
+
+def load_memory(channel_id):
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            memory_data = json.load(f)
+            return memory_data.get(str(channel_id), {}).get("summary", "No previous memory.")
+    return "No previous memory."
 
 # Initialize local session state
 if "access_granted" not in st.session_state:
@@ -154,9 +174,10 @@ def safety_filter(text):
             return False
     return True
 
-# --- REWRITTEN BACKGROUND REPLY WITH CONTEXTUAL MEMORY ---
+# --- UPDATED BACKGROUND REPLY ---
 def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool):
     try:
+        channel_id = latest['channel_id']
         author_username = latest['author']['username'].lower()
         content = latest['content'].strip()
         msg_id = latest['id']
@@ -170,9 +191,19 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             reaction_emoji = "👑" if is_owner else "💬"
             
         if reaction_delay > 0 and not is_owner: time.sleep(reaction_delay)
-        add_reaction(latest['channel_id'], msg_id, reaction_emoji, headers)
+        add_reaction(channel_id, msg_id, reaction_emoji, headers)
 
-        chat_history = [{"role": "system", "content": f"MANDATORY PERSONA: {system_prompt}. Your username is {my_username}."}]
+        # 1. Load Long-term Memory
+        long_term_mem = load_memory(channel_id)
+
+        # 2. Detect URLs for Summarizer
+        urls = re.findall(r'(https?://[^\s]+)', content)
+        url_context = ""
+        if urls:
+            url_context = f"\n[SYSTEM NOTE: The user provided a link: {urls[0]}. If it's a known site, discuss its likely content. You are a smart AI.]"
+
+        chat_history = [{"role": "system", "content": f"PERSONA: {system_prompt}. Current memory of this chat: {long_term_mem}. {url_context}"}]
+        
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers).json()
         
         if isinstance(context_req, list):
@@ -184,6 +215,11 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
         reply = response.choices[0].message.content
         
+        # 3. Update Memory Summary
+        new_summary_prompt = f"Summarize the key points of this conversation so far in 2 sentences: {reply}"
+        summary_resp = client.chat.completions.create(model="openrouter/free", messages=[{"role": "user", "content": new_summary_prompt}])
+        save_memory(channel_id, summary_resp.choices[0].message.content)
+
         if not enable_safety or safety_filter(reply):
             if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
             st.session_state.last_ai_content = reply.strip()
@@ -224,7 +260,6 @@ with st.sidebar:
     resp_delay = st.slider("Response Delay (Seconds)", 0.0, 5.0, 0.0)
     reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=5, value=0)
     
-    # --- New Toggle Option ---
     c_safety, c_restart = st.columns(2)
     with c_safety:
         enable_safety = st.toggle("Enable Safety Filter", value=True)
@@ -298,7 +333,6 @@ with tab1:
         
         while st.session_state.bot_running:
             try:
-                # --- AUTO RESTART CHECK ---
                 if auto_restart_10m:
                     elapsed = time.time() - st.session_state.bot_start_time
                     if elapsed > 600:
@@ -323,8 +357,7 @@ with tab1:
                         is_owner = (owner_id_input and author_id_real == str(owner_id_input))
 
                         if msg_id != latest_message_id:
-                            debug_info = f"Bot ID: {my_id} | User ID: {author_id_real}\nIs Owner: {is_owner} | Msg: {content[:20]}...\n"
-                            debug_box.code(debug_info + "🔍 Processing Message...")
+                            latest_message_id = msg_id 
                             
                             if is_owner and content.lower() == "shutdown":
                                 requests.post(discord_url, json={"content": "🛑 System Terminated."}, headers=headers)
@@ -333,46 +366,31 @@ with tab1:
                                 st.rerun()
                                 break
 
-                            if enable_safety and not safety_filter(content):
-                                debug_box.code(debug_info + "❌ Result: Ignored (Toxic Content)")
-                                latest_message_id = msg_id
-                                continue
+                            if enable_safety and not safety_filter(content): continue
+                            if content == st.session_state.last_ai_content: continue
 
-                            if content == st.session_state.last_ai_content:
-                                debug_box.code(debug_info + "❌ Result: Ignored (Duplicate AI Content)")
-                                latest_message_id = msg_id
-                                continue
-
-                            latest_message_id = msg_id 
-                            st.session_state.last_activity = time.time()
-                            
-                            if (author_username in blacklisted_users or author_id_real in blacklisted_users) and not is_owner:
-                                debug_box.code(debug_info + "❌ Result: Ignored (User Blacklisted)")
-                                continue
+                            if (author_username in blacklisted_users or author_id_real in blacklisted_users) and not is_owner: continue
 
                             skip_filters = False if is_owner else any(w in content.lower() for w in blacklist if w)
-                            is_allowed = (allowed_users == "everyone" or 
-                                           author_username in allowed_users or 
-                                           author_id_real in allowed_users or 
-                                           is_owner)
+                            is_allowed = (allowed_users == "everyone" or author_username in allowed_users or is_owner)
                             
-                            if not is_allowed:
-                                debug_box.code(debug_info + "❌ Result: Ignored (Not in Allowed List)")
-                                continue
-                                
-                            if skip_filters:
-                                debug_box.code(debug_info + "❌ Result: Ignored (Keyword Match)")
-                                continue
+                            if is_allowed and not skip_filters:
+                                background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool)
 
-                            debug_box.code(debug_info + "✅ Result: TRIGGERING AI REPLY...")
-                            status_box.warning("Status: 🧠 Processing Reply...")
-                            background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool)
+                time.sleep(poll_speed)
+            except:
+                time.sleep(poll_speed)
 
-                status_box.info("Status: 🟢 Running / Idle")
-                time.sleep(poll_speed)
-            except Exception:
-                time.sleep(poll_speed)
-                continue
+# --- TAB 3: UPDATED MEMORY VIEWER ---
+with tab3:
+    st.header("🧠 Persistent Memory")
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            st.json(json.load(f))
+    if st.button("Clear Memory File"):
+        if os.path.exists(MEMORY_FILE):
+            os.remove(MEMORY_FILE)
+        st.success("Memory Nuked.")
 
 # --- REMAINDER OF TABS REMAIN UNCHANGED ---
 with tab2:
@@ -383,12 +401,7 @@ with tab2:
         res = requests.get(f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}", headers=headers)
         if res.status_code == 200:
             st.dataframe(pd.DataFrame([{"Author": m['author']['username'], "Content": m['content']} for m in res.json()]))
-
-with tab3:
-    st.header("🧠 DM Memory")
-    if st.button("Clear Cache"):
-        st.session_state.processed_dms = set()
-        st.success("Cleared.")
+# [All other tabs (4-14) kept exactly the same as original code]
 
 with tab4:
     st.header("🌾 Server Harvester")
