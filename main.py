@@ -274,7 +274,7 @@ tabs_list = [
     "🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester", 
     "💎 Free Emoji", "❄️ Snowflake Decoder", "📱 App Hunter", "🎙️ VC Lurker", 
     "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander", "👻 Message Ghoster", 
-    "🎨 Text Color", "⏳ Infinite Typing", "🔎 OSINT Search"
+    "🎨 Text Color", "⏳ Infinite Typing", "🔎 OSINT Search", "🎭 Status Spoofer"
 ]
 tabs = st.tabs(tabs_list)
 
@@ -379,7 +379,7 @@ with tabs[0]:
             time.sleep(poll_speed)
             st.rerun()
 
-# --- TAB 15: OSINT SEARCH (New) ---
+# --- TAB 15: OSINT SEARCH ---
 with tabs[14]:
     st.header("🔎 OSINT Search Engine")
     st.info("Uses DuckDuckGo to find information without using AI credits.")
@@ -413,7 +413,30 @@ with tabs[14]:
                         with cols[i % 2]:
                             st.image(res['image'], caption=res['title'])
 
-# --- REMAINDER OF TABS (STAYING AS IS) ---
+# --- TAB 16: STATUS SPOOFER (New Feature) ---
+with tabs[15]:
+    st.header("🎭 Session Status Spoofer")
+    st.info("Change your account status and custom text activity directly via API.")
+    
+    status_choice = st.selectbox("Presence Status", ["online", "idle", "dnd", "invisible"])
+    custom_text = st.text_input("Custom Status Message", placeholder="Coding AI Tools...")
+    emoji_name = st.text_input("Status Emoji (Name)", placeholder="robot")
+    
+    if st.button("✨ Update Presence", use_container_width=True):
+        if token:
+            headers = get_headers(token)
+            payload = {
+                "custom_status": {"text": custom_text, "emoji_name": emoji_name},
+                "status": status_choice
+            }
+            # Using the settings endpoint is safer for simple status changes
+            res = requests.patch("https://discord.com/api/v9/users/@me/settings", headers=headers, json=payload)
+            if res.status_code == 200:
+                st.success(f"Status Updated to: {status_choice.upper()} - '{custom_text}'")
+            else:
+                st.error(f"Failed to update. Status Code: {res.status_code}")
+
+# --- REMAINDER OF TABS ---
 with tabs[1]:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
