@@ -64,8 +64,13 @@ def load_memory(channel_id):
 if "access_granted" not in st.session_state:
     st.session_state.access_granted = False
 
-# Self-destruct logic
+# --- REVOKE ALL GLOBAL CHECK ---
+# This ensures that even if the session was granted, if the CODE_FILE is gone (Revoked), everything disables.
 shared_code, shared_time = get_global_code()
+if not shared_code:
+    st.session_state.access_granted = False
+
+# Self-destruct logic (10-minute timeout)
 if shared_code and shared_time:
     if time.time() - shared_time > 600:
         if os.path.exists(CODE_FILE):
@@ -413,28 +418,43 @@ with tabs[14]:
                         with cols[i % 2]:
                             st.image(res['image'], caption=res['title'])
 
-# --- TAB 16: STATUS SPOOFER (New Feature) ---
+# --- TAB 16: STATUS SPOOFER (UPDATED) ---
 with tabs[15]:
-    st.header("🎭 Session Status Spoofer")
-    st.info("Change your account status and custom text activity directly via API.")
+    st.header("🎭 Rich Presence Spoofer")
+    st.info("Set high-level activity (Playing: X) with a working button and link.")
     
-    status_choice = st.selectbox("Presence Status", ["online", "idle", "dnd", "invisible"])
-    custom_text = st.text_input("Custom Status Message", placeholder="Coding AI Tools...")
-    emoji_name = st.text_input("Status Emoji (Name)", placeholder="robot")
+    col_act, col_link = st.columns(2)
+    with col_act:
+        act_status = st.selectbox("Appearance", ["online", "idle", "dnd", "invisible"])
+        act_name = st.text_input("Activity Name (e.g., Coding)", value="Coding")
+        act_details = st.text_input("Activity Details", value="Working on AI Tools")
     
-    if st.button("✨ Update Presence", use_container_width=True):
+    with col_link:
+        btn_label = st.text_input("Button Label", value="Join My Site")
+        btn_url = st.text_input("Button URL (Link)", value="https://google.com")
+        act_state = st.text_input("Activity State", value="Streamlit Cloud")
+
+    if st.button("✨ Set Rich Presence Activity", use_container_width=True):
         if token:
             headers = get_headers(token)
+            # This uses the settings patch to set custom status + local activity data
             payload = {
-                "custom_status": {"text": custom_text, "emoji_name": emoji_name},
-                "status": status_choice
+                "custom_status": {"text": f"Playing {act_name}", "emoji_name": "robot"},
+                "status": act_status,
+                "activities": [{
+                    "name": act_name,
+                    "type": 0, # Playing
+                    "details": act_details,
+                    "state": act_state,
+                    "buttons": [btn_label],
+                    "metadata": {"button_urls": [btn_url]}
+                }]
             }
-            # Using the settings endpoint is safer for simple status changes
             res = requests.patch("https://discord.com/api/v9/users/@me/settings", headers=headers, json=payload)
             if res.status_code == 200:
-                st.success(f"Status Updated to: {status_choice.upper()} - '{custom_text}'")
+                st.success(f"Rich Presence Active: {act_name} with Link!")
             else:
-                st.error(f"Failed to update. Status Code: {res.status_code}")
+                st.error(f"Error: {res.text}")
 
 # --- REMAINDER OF TABS ---
 with tabs[1]:
