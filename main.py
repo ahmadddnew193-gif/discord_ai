@@ -65,7 +65,6 @@ if "access_granted" not in st.session_state:
     st.session_state.access_granted = False
 
 # --- REVOKE ALL GLOBAL CHECK ---
-# This ensures that even if the session was granted, if the CODE_FILE is gone (Revoked), everything disables.
 shared_code, shared_time = get_global_code()
 if not shared_code:
     st.session_state.access_granted = False
@@ -344,7 +343,7 @@ with tabs[0]:
 
         if auto_restart_10m and (time.time() - st.session_state.bot_start_time > 600):
             st.session_state.bot_start_time = time.time()
-            st.session_state.rerun()
+            st.rerun()
 
         try:
             r = requests.get(discord_url, headers=headers, timeout=3)
@@ -418,43 +417,52 @@ with tabs[14]:
                         with cols[i % 2]:
                             st.image(res['image'], caption=res['title'])
 
-# --- TAB 16: STATUS SPOOFER (UPDATED) ---
+# --- TAB 16: STATUS SPOOFER (NTTS STYLE - UPDATED) ---
 with tabs[15]:
-    st.header("🎭 Rich Presence Spoofer")
-    st.info("Set high-level activity (Playing: X) with a working button and link.")
+    st.header("🎭 Rich Presence (NTTS Style)")
+    st.info("To get the large image and buttons, enter your Client ID from the Discord Developer Portal.")
     
-    col_act, col_link = st.columns(2)
-    with col_act:
-        act_status = st.selectbox("Appearance", ["online", "idle", "dnd", "invisible"])
-        act_name = st.text_input("Activity Name (e.g., Coding)", value="Coding")
-        act_details = st.text_input("Activity Details", value="Working on AI Tools")
+    app_id = st.text_input("Application (Client) ID", placeholder="1234567890...")
+    game_name = st.text_input("Main Heading (e.g., about me)", value="about me")
+    details = st.text_input("Sub-heading (e.g., Helping gamers out)", value="Helping gamers out")
     
-    with col_link:
-        btn_label = st.text_input("Button Label", value="Join My Site")
-        btn_url = st.text_input("Button URL (Link)", value="https://google.com")
-        act_state = st.text_input("Activity State", value="Streamlit Cloud")
+    st.divider()
+    col_img, col_btn = st.columns(2)
+    with col_img:
+        large_image_key = st.text_input("Large Image Asset Key/URL", value="mp:external/...")
+        large_text = st.text_input("Image Hover Text", value="Verified")
+    with col_btn:
+        b1_label = st.text_input("Button 1 Label", value="YouTube Channel")
+        b1_url = st.text_input("Button 1 URL", value="https://youtube.com")
+        act_status = st.selectbox("Appearance", ["online", "idle", "dnd", "invisible"], key="ntts_status")
 
-    if st.button("✨ Set Rich Presence Activity", use_container_width=True):
-        if token:
+    if st.button("✨ Apply NTTS Presence", use_container_width=True):
+        if token and app_id:
             headers = get_headers(token)
-            # This uses the settings patch to set custom status + local activity data
             payload = {
-                "custom_status": {"text": f"Playing {act_name}", "emoji_name": "robot"},
                 "status": act_status,
                 "activities": [{
-                    "name": act_name,
                     "type": 0, # Playing
-                    "details": act_details,
-                    "state": act_state,
-                    "buttons": [btn_label],
-                    "metadata": {"button_urls": [btn_url]}
+                    "application_id": app_id,
+                    "name": game_name,
+                    "details": details,
+                    "assets": {
+                        "large_image": large_image_key,
+                        "large_text": large_text
+                    },
+                    "buttons": [b1_label],
+                    "metadata": {
+                        "button_urls": [b1_url]
+                    }
                 }]
             }
             res = requests.patch("https://discord.com/api/v9/users/@me/settings", headers=headers, json=payload)
             if res.status_code == 200:
-                st.success(f"Rich Presence Active: {act_name} with Link!")
+                st.success("Presence Applied! Refresh your profile to see changes.")
             else:
                 st.error(f"Error: {res.text}")
+        else:
+            st.warning("Please enter your Token and an Application ID.")
 
 # --- REMAINDER OF TABS ---
 with tabs[1]:
