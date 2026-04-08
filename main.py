@@ -277,8 +277,8 @@ with st.sidebar:
 tabs_list = [
     "🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester", 
     "💎 Free Emoji", "❄️ Snowflake Decoder", "📱 App Hunter", "🎙️ VC Lurker", 
-    "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander", "👻 Message Ghoster", 
-    "🎨 Text Color", "⏳ Infinite Typing", "🔎 OSINT Search", "🎭 Status Spoofer"
+    "🔊 Soundboard Spoofer", "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander", 
+    "👻 Message Ghoster", "🎨 Text Color", "⏳ Infinite Typing", "🔎 OSINT Search", "🎭 Status Spoofer"
 ]
 tabs = st.tabs(tabs_list)
 
@@ -383,8 +383,8 @@ with tabs[0]:
             time.sleep(poll_speed)
             st.rerun()
 
-# --- TAB 15: OSINT SEARCH ---
-with tabs[14]:
+# --- TAB 16: OSINT SEARCH ---
+with tabs[15]:
     st.header("🔎 OSINT Search Engine")
     st.info("Uses DuckDuckGo to find information without using AI credits.")
     
@@ -417,8 +417,8 @@ with tabs[14]:
                         with cols[i % 2]:
                             st.image(res['image'], caption=res['title'])
 
-# --- TAB 16: STATUS SPOOFER (NTTS STYLE - UPDATED) ---
-with tabs[15]:
+# --- TAB 17: STATUS SPOOFER (NTTS STYLE - UPDATED) ---
+with tabs[16]:
     st.header("🎭 Rich Presence (NTTS Style)")
     st.info("To get the large image and buttons, enter your Client ID from the Discord Developer Portal.")
     
@@ -542,7 +542,34 @@ with tabs[7]:
                     found = [{"User": m['user']['username'], "ID": m['user']['id']} for m in members if 'user' in m]
                     st.table(pd.DataFrame(found))
 
+# --- NEW TAB 9: SOUNDBOARD SPOOFER ---
 with tabs[8]:
+    st.header("🔊 Soundboard Anywhere Spoofer")
+    st.info("Play sounds from any server in your current Voice Channel.")
+    
+    sound_ch_id = st.text_input("Voice Channel ID (Where you are)", value=channel_id_input)
+    sound_id = st.text_input("Sound ID (e.g. 104523...)", help="Get this from the Server Harvester or right-clicking a sound in Discord.")
+    sound_guild_id = st.text_input("Source Server (Guild) ID", help="The server where the sound exists.")
+
+    if st.button("🔊 Fire Sound", use_container_width=True):
+        if token and sound_ch_id and sound_id:
+            h = get_headers(token)
+            sound_payload = {
+                "sound_id": sound_id,
+                "source_guild_id": sound_guild_id if sound_guild_id else None
+            }
+            # Discord Soundboard Send Endpoint
+            sb_url = f"https://discord.com/api/v9/channels/{sound_ch_id}/voice-channel-effects"
+            res = requests.post(sb_url, headers=h, json=sound_payload)
+            
+            if res.status_code == 204:
+                st.success("Sound Played Successfully!")
+            else:
+                st.error(f"Failed to play sound: {res.text}")
+        else:
+            st.warning("Token, Channel ID, and Sound ID are required.")
+
+with tabs[9]:
     st.header("✨ HypeSquad Spoofer")
     house = st.selectbox("House", ["Bravery", "Brilliance", "Balance"])
     house_map = {"Bravery": 1, "Brilliance": 2, "Balance": 3}
@@ -550,20 +577,20 @@ with tabs[8]:
         requests.post("https://discord.com/api/v9/hypesquad/online", headers=get_headers(token), json={"house_id": house_map[house]})
         st.success("House Applied")
 
-with tabs[9]:
+with tabs[10]:
     st.header("🔍 Account Auditor")
     if st.button("Run Audit"):
         u_res = requests.get("https://discord.com/api/v9/users/@me", headers=get_headers(token)).json()
         st.json(u_res)
 
-with tabs[10]:
+with tabs[11]:
     st.header("📢 Webhook Commander")
     wh_url = st.text_input("Webhook URL")
     wh_msg = st.text_area("Message content")
     if st.button("Fire"):
         requests.post(wh_url, json={"content": wh_msg})
 
-with tabs[11]:
+with tabs[12]:
     st.header("👻 Message Ghoster")
     ghost_ch = st.text_input("Target Channel ID", value=channel_id_input, key="ghost_ch")
     ghost_limit = st.number_input("Scan Limit", min_value=1, max_value=500, value=50)
@@ -576,7 +603,7 @@ with tabs[11]:
                     requests.delete(f"https://discord.com/api/v9/channels/{ghost_ch}/messages/{m['id']}", headers=h)
                     time.sleep(1.2)
 
-with tabs[12]:
+with tabs[13]:
     st.header("🎨 ANSI Color Painter")
     color_text = st.text_input("Your Message")
     color_choice = st.selectbox("Color", ["Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"])
@@ -586,7 +613,7 @@ with tabs[12]:
         ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
         requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload})
 
-with tabs[13]:
+with tabs[14]:
     st.header("⏳ Infinite Typing Indicator")
     if st.button("🚀 Start Infinite Typing", use_container_width=True):
         st.session_state.typing_active = True
