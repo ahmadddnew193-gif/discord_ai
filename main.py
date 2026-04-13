@@ -69,8 +69,16 @@ shared_code, shared_time = get_global_code()
 if not shared_code:
     st.session_state.access_granted = False
 
-# Self-destruct logic (10-minute timeout)
+# --- UPDATED INACTIVITY LOGIC ---
+# This block ensures the code only expires if it ISN'T being used.
 if shared_code and shared_time:
+    # If the user is active, we push the expiration forward
+    if st.session_state.access_granted:
+        # We only update the file every 30 seconds to save disk performance
+        if time.time() - shared_time > 30:
+            set_global_code(shared_code)
+    
+    # Check for hard timeout (10 minutes of inactivity)
     if time.time() - shared_time > 600:
         if os.path.exists(CODE_FILE):
             os.remove(CODE_FILE)
@@ -339,7 +347,7 @@ with tabs[0]:
             time.sleep(poll_speed)
             st.rerun()
 
-# --- NEW TAB 21: BIO ANIMATOR ---
+# --- TAB 21: BIO ANIMATOR ---
 with tabs[20]:
     st.header("🌀 Bio Animator")
     st.info("Rotates your bio text. Warning: Changing too fast may lead to a temporary rate limit.")
@@ -360,7 +368,7 @@ with tabs[20]:
             time.sleep(10) # Internal buffer
             st.rerun()
 
-# --- NEW TAB 22: GHOST PINGER ---
+# --- TAB 22: GHOST PINGER ---
 with tabs[21]:
     st.header("👻 Ghost Pinger")
     st.info("Sends a mention and deletes it immediately. The target gets a notification but can't see the message.")
@@ -377,7 +385,7 @@ with tabs[21]:
                 requests.delete(f"{ping_url}/{msg_id}", headers=h)
                 st.success("Ghost Ping Delivered.")
 
-# --- NEW TAB 23: SERVER CLONER ---
+# --- TAB 23: SERVER CLONER ---
 with tabs[22]:
     st.header("📋 Server Structure Cloner")
     st.info("Exports all channel names, categories, and roles from a server to a JSON file.")
@@ -396,7 +404,7 @@ with tabs[22]:
             }
             st.download_button("Download Clone JSON", data=json.dumps(clone_package, indent=4), file_name=f"clone_{clone_guild_id}.json")
 
-# --- REMAINING TABS (UNCHANGED) ---
+# --- OTHER TABS ---
 with tabs[15]:
     st.header("🔎 OSINT Search Engine")
     q_col, t_col = st.columns([3, 1])
@@ -481,7 +489,6 @@ with tabs[19]:
             requests.patch("https://discord.com/api/v9/users/@me", headers=get_headers(token), json={"bio": "\u17b5"})
             st.success("Bio Ghosted.")
 
-# [Tabs 1-14 truncated for brevity but remain identical in original code]
 with tabs[1]:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
