@@ -3,3 +3,4 @@ openai
 requests
 duckduckgo_search
 csv
+cv2
