@@ -648,6 +648,7 @@ with tabs[23]:
                 st.error(f"Failed to patch: {res.status_code}")
 
 # --- TAB 25: 2D TEXT ANIMATOR ---
+# --- TAB 25: 2D TEXT MATRIX ANIMATOR ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
     st.info("Sends a text matrix and rapidly edits it frame-by-frame to create a live 2D flipbook animation in chat.")
@@ -660,21 +661,11 @@ with tabs[24]:
             "```\n  \\ \n  \\\\(@)~ \n    ###   \n  _// \\_ \n```",
             "```\n        \n    (@)/ \n   /###  \n  _/  \\  \n```",
             "```\n        \n   _@_   \n  (###)  \n  _/ \\_  \n```",
-            "```\n        \n   \\(@)  \n    ###\\ \n    /  \\_\n```",
-            "```\n        \n  ~(@)~  \n   ###   \n  _// \\_ \n```",
-            "```\n        \n   _(@)_ \n  / ### \\\n    /   \\\n```"
-        ],
-        "⚽ Bouncing Ball": [
-            "```\n[○      ]\n```", "```\n[  ○    ]\n```", "```\n[    ○  ]\n```",
-            "```\n[      ○]\n```", "```\n[    ○  ]\n```", "```\n[  ○    ]\n```"
+            "```\n        \n   \\(@)  \n    ###\\ \n    /  \\_\n```"
         ],
         "🤖 Robot Face Blink": [
             "```\n  [ O _ O ] \n   /|___|\\  \n```", "```\n  [ - _ - ] \n   /|___|\\  \n```",
             "```\n  [ O _ O ] \n   /|___|\\  \n```", "```\n  [ > _ < ] \n   /|___|\\  \n```"
-        ],
-        "📡 Loading Radar": [
-            "```\n   ⏱️ [|] Loading\n```", "```\n   ⏱️ [/] Loading.\n```",
-            "```\n   ⏱️ [-] Loading..\n```", "```\n   ⏱️ [\\] Loading...\n```"
         ]
     }
     
@@ -689,67 +680,89 @@ with tabs[24]:
         
         col_w, col_inv = st.columns(2)
         with col_w:
-            target_width = st.slider("ASCII Width (Columns)", min_value=15, max_value=60, value=40, 
-                                    help="Setting this under 45 prevents ugly line wrapping artifacts inside Discord.")
+            max_cols = st.slider("Target Max Width (Columns)", min_value=15, max_value=60, value=42, 
+                                help="40-45 columns is ideal for avoiding layout wrapping on Discord desktop/mobile.")
         with col_inv:
             invert_contrast = st.toggle("Invert Text Contrast", value=False, 
-                                        help="Toggle if the art looks inverted relative to Discord's dark mode background.")
+                                        help="Flip this if the dark/light regions look inverted on Discord's dark theme.")
             
         if custom_gif is not None:
-            with st.spinner("Processing GIF frames to proportional ASCII matrices..."):
+            with st.spinner("Analyzing aspect ratio and compiling frames..."):
                 try:
-                    # Write file stream to disk temporarily for OpenCV read operations
+                    # Save stream to temporary file for OpenCV processing
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".gif") as tmp:
                         tmp.write(custom_gif.getvalue())
                         tmp_path = tmp.name
                     
                     cap = cv2.VideoCapture(tmp_path)
                     
-                    # Character ramp: dense characters mimic bright values in code blocks
-                    ascii_ramp = " .:-=+*#%@" if not invert_contrast else "@%#*+=-:. "
-                    ramp_len = len(ascii_ramp)
-                    
-                    while True:
-                        ret, frame = cap.read()
-                        if not ret:
-                            break
+                    # 1. Read first frame to calculate dimensions
+                    ret, first_frame = cap.read()
+                    if not ret:
+                        st.error("Could not parse frames from the uploaded GIF.")
+                        is_engine_ready = False
+                    else:
+                        orig_h, orig_w = first_frame.shape[:2]
+                        
+                        # Monospace character font correction factor (Width is ~0.55 of height in Discord)
+                        aspect_ratio_modifier = (orig_h / orig_w) * 0.55
+                        
+                        # 2. Dynamic Math Engine: Calculate max safe width to stay under 1950 characters
+                        # Equation: (W + 1) * (W * aspect_modifier) + 8 <= 1950
+                        # R * W^2 + R * W - 1942 <= 0
+                        R = aspect_ratio_modifier
+                        if R > 0:
+                            import math
+                            calculated_max_w = (-R + math.sqrt((R**2) - (4 * R * -1942))) / (2 * R)
+                            safe_width = min(int(calculated_max_w), max_cols)
+                        else:
+                            safe_width = max_cols
                             
-                        # Standardize color layout
-                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                        orig_h, orig_w = gray.shape
+                        safe_height = max(1, int(safe_width * aspect_ratio_modifier))
                         
-                        # Apply monospace text squish factor (0.55)
-                        computed_height = int(target_width * (orig_h / orig_w) * 0.55)
-                        computed_height = max(1, computed_height)
+                        # 3. Final safety iteration loop to absolute guarantee Discord compliance
+                        while (safe_width + 1) * safe_height + 8 > 1950:
+                            safe_width -= 1
+                            safe_height = max(1, int(safe_width * aspect_ratio_modifier))
                         
-                        # Explicit check against maximum character limits
-                        if (target_width + 1) * computed_height > 1900:
-                            st.warning("Resolution bound exceeds safe thresholds. Readjusting proportions down.")
-                            target_width = 35
-                            computed_height = int(target_width * (orig_h / orig_w) * 0.55)
+                        st.caption(f"📐 Auto-scaled frame canvas grid to: **{safe_width}x{safe_height}** characters.")
                         
-                        resized_frame = cv2.resize(gray, (target_width, computed_height))
+                        # Define ASCII palette ramp
+                        ascii_ramp = " .:-=+*#%@" if not invert_contrast else "@%#*+=-:. "
+                        ramp_len = len(ascii_ramp)
                         
-                        # Translate pixels into spatial text rows
-                        matrix_lines = []
-                        for row in resized_frame:
-                            line_chars = "".join([ascii_ramp[int(pixel / 256 * ramp_len)] for pixel in row])
-                            matrix_lines.append(line_chars)
+                        # Reset capture pointer to beginning of the file
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+                        
+                        # 4. Render out the frame sequences
+                        while True:
+                            ret, frame = cap.read()
+                            if not ret:
+                                break
+                                
+                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                            resized = cv2.resize(gray, (safe_width, safe_height), interpolation=cv2.INTER_AREA)
                             
-                        formatted_block = "```\n" + "\n".join(matrix_lines) + "\n```"
-                        frames.append(formatted_block)
-                        
+                            matrix_lines = []
+                            for row in resized:
+                                line_chars = "".join([ascii_ramp[int(pixel / 256 * ramp_len)] for pixel in row])
+                                matrix_lines.append(line_chars)
+                                
+                            # Wrap frame in a markdown code-block wrapper
+                            formatted_block = "```\n" + "\n".join(matrix_lines) + "\n```"
+                            frames.append(formatted_block)
+                            
                     cap.release()
                     os.unlink(tmp_path)
                     
                     if len(frames) == 0:
-                        st.error("No extractable visual frames discovered inside the uploaded asset.")
+                        st.error("No extractable visual data found inside this asset.")
                         is_engine_ready = False
                     else:
                         st.success(f"Parsed {len(frames)} frames successfully! Ready to render.")
                         
                 except Exception as e:
-                    st.error(f"Engine failure during file conversion: {str(e)}")
+                    st.error(f"Engine conversion error: {str(e)}")
                     is_engine_ready = False
         else:
             is_engine_ready = False
@@ -757,36 +770,36 @@ with tabs[24]:
         frames = animation_presets[selected_anim]
 
     loop_count = st.slider("Animation Loops", 1, 10, 3)
-    frame_delay = st.slider("Frame Delay (Seconds)", 1.2, 3.0, 1.5, 
-                            help="Edits faster than 1.2s risk triggering heavy API 429 rate limit cool-downs.")
+    frame_delay = st.slider("Frame Delay (Seconds)", 1.0, 3.0, 1.3, 
+                            help="Speeds faster than 1.2s will trigger Discord's aggressive HTTP 429 rate limits.")
 
     if st.button("🚀 Fire 2D Animation", use_container_width=True, disabled=not is_engine_ready):
         if token and anim_ch and frames:
             h = get_headers(token)
-            edit_url = f"https://discord.com/api/v9/channels/{anim_ch}/messages"
+            base_url = f"https://discord.com/api/v9/channels/{anim_ch}/messages"
             
-            # Step 1: Deploy base message hook frame
-            first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]})
+            # Step 1: Push base placeholder post
+            first_frame_res = requests.post(base_url, headers=h, json={"content": frames[0]})
             
             if first_frame_res.status_code == 200:
                 msg_id = first_frame_res.json()["id"]
-                specific_msg_url = f"{edit_url}/{msg_id}"
+                specific_msg_url = f"{base_url}/{msg_id}"
                 status_placeholder = st.empty()
                 
-                # Step 2: Loop sequential frame mutations via PATCH
+                # Step 2: Loop sequential frame modifications via PATCH
                 for current_loop in range(loop_count):
                     for frame_idx, frame_content in enumerate(frames):
-                        status_placeholder.write(f"🎬 Playing: Loop {current_loop + 1} | Frame {frame_idx + 1}/{len(frames)}")
+                        status_placeholder.write(f"🎬 Playing: Loop {current_loop + 1}/{loop_count} | Frame {frame_idx + 1}/{len(frames)}")
                         
                         res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content})
                         
                         if res.status_code == 429:
-                            retry_after = res.json().get("retry_after", 2)
-                            status_placeholder.warning(f"⏳ Rate limited. Cooling down for {retry_after}s...")
+                            retry_after = res.json().get("retry_after", 2.0)
+                            status_placeholder.warning(f"⏳ Rate limited. Backing off for {retry_after}s...")
                             time.sleep(retry_after)
                         
                         time.sleep(frame_delay)
                 
                 status_placeholder.success("✨ Animation sequence finished running successfully!")
             else:
-                st.error(f"Failed to initiate animation: {first_frame_res.text}")
+                st.error(f"Failed to initiate animation stream: {first_frame_res.text}")
