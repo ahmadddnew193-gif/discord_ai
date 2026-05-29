@@ -285,7 +285,7 @@ tabs_list = [
     "🔊 Soundboard Spoofer", "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander", 
     "👻 Message Ghoster", "🎨 Text Color", "⏳ Infinite Typing", "🔎 OSINT Search", 
     "🎭 Status Spoofer", "🖼️ Sticker Spoofer", "📦 Large File Bridge", "👻 Invisible Identity",
-    "🌀 Bio Animator", "👻 Ghost Pinger", "📋 Server Cloner","NITRO BADGE"
+    "🌀 Bio Animator", "👻 Ghost Pinger", "📋 Server Cloner","NITRO BADGE", "🎬 2D Animator"
 ]
 tabs = st.tabs(tabs_list)
 
@@ -625,6 +625,7 @@ with tabs[14]:
         requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/typing", headers=get_headers(token))
         time.sleep(random.randint(5, 8))
         st.rerun()
+
 # --- NEW TAB: NITRO BADGE SPOOFER ---
 with tabs[23]:
     st.header("💎 Nitro Badge Spoofer")
@@ -649,3 +650,78 @@ with tabs[23]:
                 st.success(f"Flags patched to: {new_flags}. Refresh your client/browser.")
             else:
                 st.error(f"Failed to patch: {res.status_code}")
+
+# --- NEW TAB: 2D TEXT ANIMATOR ---
+with tabs[24]:
+    st.header("🎬 2D Text Matrix Animator")
+    st.info("Sends a text matrix and rapidly edits it frame-by-frame to create a live 2D flipbook animation in chat.")
+    
+    anim_ch = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
+    
+    # Pre-built frame animation matrices
+    animation_presets = {
+        "⚽ Bouncing Ball": [
+            "```\n[○      ]\n```",
+            "```\n[  ○    ]\n```",
+            "```\n[    ○  ]\n```",
+            "```\n[      ○]\n```",
+            "```\n[    ○  ]\n```",
+            "```\n[  ○    ]\n```"
+        ],
+        "🤖 Robot Face Blink": [
+            "```\n  [ O _ O ] \n   /|___|\\  \n```",
+            "```\n  [ - _ - ] \n   /|___|\\  \n```",
+            "```\n  [ O _ O ] \n   /|___|\\  \n```",
+            "```\n  [ > _ < ] \n   /|___|\\  \n```"
+        ],
+        "📡 Loading Radar": [
+            "```\n   ⏱️ [|] Loading\n```",
+            "```\n   ⏱️ [/] Loading.\n```",
+            "```\n   ⏱️ [-] Loading..\n```",
+            "```\n   ⏱️ [\\] Loading...\n```"
+        ]
+    }
+    
+    selected_anim = st.selectbox("Choose Animation Preset", list(animation_presets.keys()))
+    loop_count = st.slider("Animation Loops", 1, 10, 3)
+    
+    # Safety delay: Discord heavily rate-limits (429) rapid message edits. 
+    # 1.5s to 2.0s is the absolute safest sweet spot.
+    frame_delay = st.slider("Frame Delay (Seconds)", 1.2, 3.0, 1.5, 
+                            help="Faster speeds look smoother but increase the risk of API rate limits.")
+
+    if st.button("🚀 Fire 2D Animation", use_container_width=True):
+        if token and anim_ch:
+            frames = animation_presets[selected_anim]
+            h = get_headers(token)
+            edit_url = f"https://discord.com/api/v9/channels/{anim_ch}/messages"
+            
+            # Step 1: Send the first frame to establish the message container
+            first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]})
+            
+            if first_frame_res.status_code == 200:
+                msg_id = first_frame_res.json()["id"]
+                specific_msg_url = f"{edit_url}/{msg_id}"
+                
+                # UI progress indicator on the website
+                status_placeholder = st.empty()
+                
+                # Step 2: Loop through and patch the message content over time
+                for current_loop in range(loop_count):
+                    for frame_idx, frame_content in enumerate(frames):
+                        status_placeholder.write(f"🎬 Playing: Loop {current_loop + 1} | Frame {frame_idx + 1}")
+                        
+                        # PATCH updates the existing message instantly for everyone
+                        res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content})
+                        
+                        if res.status_code == 429:
+                            # Auto-handling rate limits if they happen
+                            retry_after = res.json().get("retry_after", 2)
+                            status_placeholder.warning(f"⏳ Rate limited. Cooling down for {retry_after}s...")
+                            time.sleep(retry_after)
+                        
+                        time.sleep(frame_delay)
+                
+                status_placeholder.success("✨ Animation sequence finished running successfully!")
+            else:
+                st.error(f"Failed to initiate animation: {first_frame_res.text}")
