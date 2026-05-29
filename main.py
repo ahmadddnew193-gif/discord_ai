@@ -285,7 +285,7 @@ tabs_list = [
     "🔊 Soundboard Spoofer", "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander", 
     "👻 Message Ghoster", "🎨 Text Color", "⏳ Infinite Typing", "🔎 OSINT Search", 
     "🎭 Status Spoofer", "🖼️ Sticker Spoofer", "📦 Large File Bridge", "👻 Invisible Identity",
-    "🌀 Bio Animator", "👻 Ghost Pinger", "📋 Server Cloner"
+    "🌀 Bio Animator", "👻 Ghost Pinger", "📋 Server Cloner","NITRO BADGE"
 ]
 tabs = st.tabs(tabs_list)
 
@@ -625,3 +625,27 @@ with tabs[14]:
         requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/typing", headers=get_headers(token))
         time.sleep(random.randint(5, 8))
         st.rerun()
+# --- NEW TAB: NITRO BADGE SPOOFER ---
+with tabs[23]:
+    st.header("💎 Nitro Badge Spoofer")
+    st.warning("⚠️ Warning: Manipulating account flags is purely cosmetic and local to the API's response. Discord may reset these if they detect the mismatch.")
+    
+    # 1 << 0 is usually Nitro, but other flags require specific bitwise values
+    nitro_bit = 1 
+    
+    if st.button("✨ Apply Nitro Badge", use_container_width=True):
+        if token:
+            h = get_headers(token)
+            # Fetch current flags first to avoid overwriting existing ones
+            user_data = requests.get("https://discord.com/api/v9/users/@me", headers=h).json()
+            current_flags = user_data.get("flags", 0)
+            
+            # Apply bitwise OR to set the flag
+            new_flags = current_flags | nitro_bit
+            
+            res = requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": new_flags})
+            
+            if res.status_code == 200:
+                st.success(f"Flags patched to: {new_flags}. Refresh your client/browser.")
+            else:
+                st.error(f"Failed to patch: {res.status_code}")
