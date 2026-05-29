@@ -1,6 +1,6 @@
 streamlit
 openai
 requests
-duckduckgo_search
-csv
-cv2
+pandas
+duckduckgo-search
+opencv-python-headless
