@@ -70,15 +70,11 @@ if not shared_code:
     st.session_state.access_granted = False
 
 # --- UPDATED INACTIVITY LOGIC ---
-# This block ensures the code only expires if it ISN'T being used.
 if shared_code and shared_time:
-    # If the user is active, we push the expiration forward
     if st.session_state.access_granted:
-        # We only update the file every 30 seconds to save disk performance
         if time.time() - shared_time > 30:
             set_global_code(shared_code)
     
-    # Check for hard timeout (10 minutes of inactivity)
     if time.time() - shared_time > 600:
         if os.path.exists(CODE_FILE):
             os.remove(CODE_FILE)
@@ -562,17 +558,17 @@ with tabs[7]:
                     found = [{"User": m['user']['username'], "ID": m['user']['id']} for m in members if 'user' in m]
                     st.table(pd.DataFrame(found))
 
-with tabs[8]:
-    st.header("🔊 Soundboard Anywhere Spoofer")
-    sound_ch_id = st.text_input("Voice Channel ID", value=channel_id_input)
-    sound_id = st.text_input("Sound ID")
-    sound_guild_id = st.text_input("Source Server ID")
-    if st.button("🔊 Fire Sound", use_container_width=True):
-        if token and sound_ch_id and sound_id:
-            h = get_headers(token)
-            sb_url = f"https://discord.com/api/v9/channels/{sound_ch_id}/voice-channel-effects"
-            res = requests.post(sb_url, headers=h, json={"sound_id": sound_id, "source_guild_id": sound_guild_id if sound_guild_id else None})
-            if res.status_code == 204: st.success("Sound Played!")
+    with tabs[8]:
+        st.header("🔊 Soundboard Anywhere Spoofer")
+        sound_ch_id = st.text_input("Voice Channel ID", value=channel_id_input)
+        sound_id = st.text_input("Sound ID")
+        sound_guild_id = st.text_input("Source Server ID")
+        if st.button("🔊 Fire Sound", use_container_width=True):
+            if token and sound_ch_id and sound_id:
+                h = get_headers(token)
+                sb_url = f"https://discord.com/api/v9/channels/{sound_ch_id}/voice-channel-effects"
+                res = requests.post(sb_url, headers=h, json={"sound_id": sound_id, "source_guild_id": sound_guild_id if sound_guild_id else None})
+                if res.status_code == 204: st.success("Sound Played!")
 
 with tabs[9]:
     st.header("✨ HypeSquad Spoofer")
@@ -631,17 +627,14 @@ with tabs[23]:
     st.header("💎 Nitro Badge Spoofer")
     st.warning("⚠️ Warning: Manipulating account flags is purely cosmetic and local to the API's response. Discord may reset these if they detect the mismatch.")
     
-    # 1 << 0 is usually Nitro, but other flags require specific bitwise values
     nitro_bit = 1 
     
     if st.button("✨ Apply Nitro Badge", use_container_width=True):
         if token:
             h = get_headers(token)
-            # Fetch current flags first to avoid overwriting existing ones
             user_data = requests.get("https://discord.com/api/v9/users/@me", headers=h).json()
             current_flags = user_data.get("flags", 0)
             
-            # Apply bitwise OR to set the flag
             new_flags = current_flags | nitro_bit
             
             res = requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": new_flags})
@@ -658,83 +651,75 @@ with tabs[24]:
     
     anim_ch = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     
-    # Pre-built frame animation matrices
-    # Pre-built frame animation matrices
-        animation_presets = {
-            "💃 Cyber Punk Dance Loop": [
-                "```\n  \\ \n  \\\\(@)~ \n   ###   \n  _// \\_ \n```",
-                "```\n        \n    (@)/ \n   /###  \n  _/  \\  \n```",
-                "```\n        \n   _@_   \n  (###)  \n  _/ \\_  \n```",
-                "```\n        \n   \\(@)  \n    ###\\ \n    /  \\_\n```",
-                "```\n        \n  ~(@)~  \n   ###   \n  _// \\_ \n```",
-                "```\n        \n   _(@)_ \n  / ### \\\n   /   \\\n```"
-            ],
-            "⚽ Bouncing Ball": [
-                "```\n[○      ]\n```",
-                "```\n[  ○    ]\n```",
-                "```\n[    ○  ]\n
-    ```",
-                "```\n[      ○]\n```",
-                "```\n[    ○  ]\n```",
-                "```\n[  ○    ]\n```"
-            ],
-            "🤖 Robot Face Blink": [
-                "```\n  [ O _ O ] \n   /|___|\\  \n```",
-                "```\n  [ - _ - ] \n   /|___|\\  \n
-    ```",
-                "```\n  [ O _ O ] \n   /|___|\\  \n```",
-                "```\n  [ > _ < ] \n   /|___|\\  \n```"
-            ],
-            "📡 Loading Radar": [
-                "```\n   ⏱️ [|] Loading\n
-    ```",
-                "```\n   ⏱️ [/] Loading.\n```",
-                "```\n   ⏱️ [-] Loading..\n
-    ```",
-                "```\n   ⏱️ [\\] Loading...\n```"
-            ]
-        }
+    animation_presets = {
+        "💃 Deluxe Cyber Dance (Bad Girl Loop)": [
+            "```\n   ~  @  ~   \n    \\\\###/    \n     ###     \n    _/ \\_    \n   /     \\\\   \n```",
+            "```\n      _ @ /  \n     ~ ###   \n      /###   \n     _/  \\\\\\\\  \n    /     \\\\_ \n```",
+            "```\n     \\\\ @ _   \n      ### ~  \n      ###\\\\   \n     //  \\\\_  \n    _/     \\\\ \n```",
+            "```\n       _@_   \n     ((###)) \n      -###-  \n      _//\\\\\\\\_ \n     /      \\\\\n```",
+            "```\n     ~  @  ~ \n      \\\\###/  \n       ###   \n      _// \\_ \n     /     _\\\\\n```",
+            "```\n        @ /  \n     \\\\_###~  \n      /###   \n     _/  \\_  \n    /      \\\\\n```"
+        ],
+        "🌀 Hypnotic Cyber Vortex": [
+            "```\n    .::###::.   \n  ::@@@@@@@@@:: \n :##~~~@~~~##: \n  ::@@@@@@@@@:: \n    '::###::'   \n```",
+            "```\n    .::@@@::.   \n  ::#########:: \n :@@~~~#~~~@@: \n  ::#########:: \n    '::@@@::'   \n```",
+            "```\n    .::~~~::.   \n  ::@@@###@@@:: \n :###~~@~~###: \n  ::@@@###@@@:: \n    '::~~~::'   \n```",
+            "```\n    .::###::.   \n  ::~@~@~@~@~:: \n :@@@##~##@@@: \n  ::~@~@~@~@~:: \n    '::###::'   \n```"
+        ],
+        "🦅 Cyber Phoenix Flight": [
+            "```\n     ___ @ ___    \n  \\\\\\\\\\\\  (###)  /// \n   \\\\\\\\\\\\  ###  ///  \n     \\\\\\\\_ V _//    \n       \\_|_/      \n```",
+            "```\n     ___ @ ___    \n  ~~~\\\\  (###)  /~~~\n   ~~~\\\\  ###  /~~~ \n       \\_V_/      \n        \\\\|/       \n```",
+            "```\n       _ @ _      \n     /  (###)  \\\\  \n    /   /###\\\\   \\\\ \n   /   // V \\\\\\\\   \\\\\n       \\\\\\\\_|_//    \n```",
+            "```\n     ___ @ ___    \n  ///   (###)   \\\\\\\\\\\\\n ///    /###\\\\    \\\\\\\\\\\\\n       // V \\\\\\\\    \n      /// | \\\\\\\\\\\\   \n```"
+        ],
+        "⚔️ Neon Blade Kata": [
+            "```\n    _@_  ///     \n   (###)=##>     \n   /###\\\\         \n  _/   \\_        \n /       \\\\       \n```",
+            "```\n     _@_         \n    (###)        \n   //###\\\\\\\\  |    \n  _/   _//==#==> \n /    /     |    \n```",
+            "          _@_    \n  <##=(###)    \n       /###\\\\     \n      _/   \\_    \n     /       \\\\   \n```",
+            "```\n     \\\\ _@_ /     \n      (###)      \n       ###       \n      _//\\\\\\\\_     \n     /      \\\\    \n```"
+        ],
+        "🤖 Advanced Neuro-Face (Reactive)": [
+            "```\n ╔═════════════╗ \n ║  ◤ @ _ @ ◥  ║ \n ║   \\\\_###_/   ║ \n ╚═════════════╝ \n```",
+            "```\n ╔═════════════╗ \n ║  ◣ ▰ _ ▰ ◢  ║ \n ║   \\\\_===_/   ║ \n ╚═════════════╝ \n```",
+            "```\n ╔═════════════╗ \n ║  ◤ # _ # ◥  ║ \n ║   \\\\_@@@_/   ║ \n ╚═════════════╝ \n```",
+            "```\n ╔═════════════╗ \n ║  ◣ - _ - ◢  ║ \n ║   \\\\_===_/   ║ \n ╚═════════════╝ \n```"
+        ]
+    }
     
-    selected_anim = st.selectbox("Choose Animation Preset", list(animation_presets.keys()))
-    loop_count = st.slider("Animation Loops", 1, 10, 3)
+    selected_anim = st.selectbox("Select Advanced ASCII Preset", list(animation_presets.keys()))
+    anim_speed = st.slider("Frame Delay (Seconds)", 1.0, 5.0, 1.2, help="Keep at or above 1.2s to avoid Discord 429 rate limits.")
     
-    # Safety delay: Discord heavily rate-limits (429) rapid message edits. 
-    # 1.5s to 2.0s is the absolute safest sweet spot.
-    frame_delay = st.slider("Frame Delay (Seconds)", 1.2, 3.0, 1.5, 
-                            help="Faster speeds look smoother but increase the risk of API rate limits.")
-
-    if st.button("🚀 Fire 2D Animation", use_container_width=True):
-        if token and anim_ch:
-            frames = animation_presets[selected_anim]
-            h = get_headers(token)
-            edit_url = f"https://discord.com/api/v9/channels/{anim_ch}/messages"
+    if "anim_active" not in st.session_state: st.session_state.anim_active = False
+    if "anim_msg_id" not in st.session_state: st.session_state.anim_msg_id = None
+    if "anim_frame_idx" not in st.session_state: st.session_state.anim_frame_idx = 0
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("▶️ Start Animation", use_container_width=True):
+            st.session_state.anim_active = True
+            st.session_state.anim_msg_id = None
+            st.session_state.anim_frame_idx = 0
+            st.rerun()
+    with c2:
+        if st.button("🛑 Stop Animation", use_container_width=True):
+            st.session_state.anim_active = False
+            st.session_state.anim_msg_id = None
+            st.rerun()
             
-            # Step 1: Send the first frame to establish the message container
-            first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]})
+    if st.session_state.anim_active and token and anim_ch:
+        frames = animation_presets[selected_anim]
+        idx = st.session_state.anim_frame_idx % len(frames)
+        current_frame = frames[idx]
+        h = get_headers(token)
+        
+        if st.session_state.anim_msg_id is None:
+            res = requests.post(f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){anim_ch}/messages", headers=h, json={"content": current_frame})
+            if res.status_code == 200:
+                st.session_state.anim_msg_id = res.json()['id']
+        else:
+            requests.patch(f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){anim_ch}/messages/{st.session_state.anim_msg_id}", headers=h, json={"content": current_frame})
             
-            if first_frame_res.status_code == 200:
-                msg_id = first_frame_res.json()["id"]
-                specific_msg_url = f"{edit_url}/{msg_id}"
-                
-                # UI progress indicator on the website
-                status_placeholder = st.empty()
-                
-                # Step 2: Loop through and patch the message content over time
-                for current_loop in range(loop_count):
-                    for frame_idx, frame_content in enumerate(frames):
-                        status_placeholder.write(f"🎬 Playing: Loop {current_loop + 1} | Frame {frame_idx + 1}")
-                        
-                        # PATCH updates the existing message instantly for everyone
-                        res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content})
-                        
-                        if res.status_code == 429:
-                            # Auto-handling rate limits if they happen
-                            retry_after = res.json().get("retry_after", 2)
-                            status_placeholder.warning(f"⏳ Rate limited. Cooling down for {retry_after}s...")
-                            time.sleep(retry_after)
-                        
-                        time.sleep(frame_delay)
-                
-                status_placeholder.success("✨ Animation sequence finished running successfully!")
-            else:
-                st.error(f"Failed to initiate animation: {first_frame_res.text}")
+        st.session_state.anim_frame_idx += 1
+        time.sleep(anim_speed)
+        st.rerun()
+        
