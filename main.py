@@ -10,8 +10,9 @@ import pandas as pd
 import base64
 import json
 import re
+import cv2        # Added for processing GIF frames
+import tempfile   # Added for handling uploaded file bytes safely
 from duckduckgo_search import DDGS
-import cv2  # Added for processing video to ASCII frames locally
 
 st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
 
@@ -646,134 +647,136 @@ with tabs[23]:
             else:
                 st.error(f"Failed to patch: {res.status_code}")
 
-# --- NEW TAB: 2D TEXT ANIMATOR ---
+# --- TAB 25: 2D TEXT ANIMATOR ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
     st.info("Sends a text matrix and rapidly edits it frame-by-frame to create a live 2D flipbook animation in chat.")
     
     anim_ch = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     
+    # Pre-built frame animation matrices
     animation_presets = {
         "💃 Cyber Punk Dance Loop": [
-            "```\n  \\ \n  \\\\(@)~ \n   ###   \n  _// \\_ \n```",
+            "```\n  \\ \n  \\\\(@)~ \n    ###   \n  _// \\_ \n```",
             "```\n        \n    (@)/ \n   /###  \n  _/  \\  \n```",
             "```\n        \n   _@_   \n  (###)  \n  _/ \\_  \n```",
             "```\n        \n   \\(@)  \n    ###\\ \n    /  \\_\n```",
             "```\n        \n  ~(@)~  \n   ###   \n  _// \\_ \n```",
-            "```\n        \n   _(@)_ \n  / ### \\\n  /   \\\n```"
+            "```\n        \n   _(@)_ \n  / ### \\\n    /   \\\n```"
         ],
         "⚽ Bouncing Ball": [
-            "```\n[○      ]\n```",
-            "```\n[  ○    ]\n```",
-            "```\n[    ○  ]\n```",
-            "```\n[      ○]\n```",
-            "```\n[    ○  ]\n```",
-            "```\n[  ○    ]\n```"
+            "```\n[○      ]\n```", "```\n[  ○    ]\n```", "```\n[    ○  ]\n```",
+            "```\n[      ○]\n```", "```\n[    ○  ]\n```", "```\n[  ○    ]\n```"
         ],
         "🤖 Robot Face Blink": [
-            "```\n  [ O _ O ] \n   /|___|\\  \n```",
-            "```\n  [ - _ - ] \n   /|___|\\  \n```",
-            "```\n  [ O _ O ] \n   /|___|\\  \n```",
-            "```\n  [ > _ < ] \n   /|___|\\  \n```"
+            "```\n  [ O _ O ] \n   /|___|\\  \n```", "```\n  [ - _ - ] \n   /|___|\\  \n```",
+            "```\n  [ O _ O ] \n   /|___|\\  \n```", "```\n  [ > _ < ] \n   /|___|\\  \n```"
         ],
         "📡 Loading Radar": [
-            "```\n   ⏱️ [|] Loading\n```",
-            "```\n   ⏱️ [/] Loading.\n```",
-            "```\n   ⏱️ [-] Loading..\n```",
-            "```\n   ⏱️ [\\] Loading...\n```"
+            "```\n   ⏱️ [|] Loading\n```", "```\n   ⏱️ [/] Loading.\n```",
+            "```\n   ⏱️ [-] Loading..\n```", "```\n   ⏱️ [\\] Loading...\n```"
         ]
     }
     
-    anim_mode = st.radio("Animation Source Mode", ["Preset Loops", "Custom Video-to-ASCII 🎬"], horizontal=True)
+    preset_options = list(animation_presets.keys()) + ["📁 Upload Custom GIF"]
+    selected_anim = st.selectbox("Choose Animation Preset", preset_options)
     
-    if anim_mode == "Preset Loops":
-        selected_anim = st.selectbox("Choose Animation Preset", list(animation_presets.keys()))
-        loop_count = st.slider("Animation Loops", 1, 10, 3)
-    else:
-        uploaded_video = st.file_uploader("Upload a Short Video (.mp4, .mov, .avi, .gif)", type=["mp4", "mov", "avi", "gif"])
-        col_v1, col_v2 = st.columns(2)
-        with col_v1:
-            v_width = st.slider("ASCII Width (Columns)", 20, 50, 35, help="Keep under 45 to stay within Discord's line wrap limits.")
-            v_height = st.slider("ASCII Height (Rows)", 10, 25, 15)
-        with col_v2:
-            max_v_frames = st.slider("Max Frames to Process", 5, 25, 12, help="Fewer frames protect from rate limits.")
-            loop_count = st.slider("Animation Loops", 1, 5, 1)
+    frames = []
+    is_engine_ready = True
     
-    frame_delay = st.slider("Frame Delay (Seconds)", 1.2, 3.0, 1.5, 
-                            help="Faster speeds look smoother but increase the risk of API rate limits.")
-
-    if st.button("🚀 Fire 2D Animation", use_container_width=True):
-        if token and anim_ch:
-            frames = []
+    if selected_anim == "📁 Upload Custom GIF":
+        custom_gif = st.file_uploader("Upload an animated .gif file", type=["gif"])
+        
+        col_w, col_inv = st.columns(2)
+        with col_w:
+            target_width = st.slider("ASCII Width (Columns)", min_value=15, max_value=60, value=40, 
+                                    help="Setting this under 45 prevents ugly line wrapping artifacts inside Discord.")
+        with col_inv:
+            invert_contrast = st.toggle("Invert Text Contrast", value=False, 
+                                        help="Toggle if the art looks inverted relative to Discord's dark mode background.")
             
-            if anim_mode == "Preset Loops":
-                frames = animation_presets[selected_anim]
-            else:
-                if uploaded_video is not None:
-                    temp_file_path = "temp_processing_video.mp4"
-                    with open(temp_file_path, "wb") as f:
-                        f.write(uploaded_video.read())
+        if custom_gif is not None:
+            with st.spinner("Processing GIF frames to proportional ASCII matrices..."):
+                try:
+                    # Write file stream to disk temporarily for OpenCV read operations
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=".gif") as tmp:
+                        tmp.write(custom_gif.getvalue())
+                        tmp_path = tmp.name
                     
-                    with st.spinner("Processing video frames into ASCII grids..."):
-                        try:
-                            cap = cv2.VideoCapture(temp_file_path)
-                            total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-                            if total_frames > 0:
-                                step = max(1, total_frames // max_v_frames)
-                                ascii_chars = [" ", ".", ":", "-", "=", "+", "*", "#", "%", "@"]
-                                frame_idx = 0
-                                saved_count = 0
-                                
-                                while cap.isOpened() and saved_count < max_v_frames:
-                                    ret, frame = cap.read()
-                                    if not ret:
-                                        break
-                                    if frame_idx % step == 0:
-                                        resized = cv2.resize(frame, (v_width, v_height))
-                                        gray = cv2.cvtColor(resized, cv2.COLOR_BGR2GRAY)
-                                        
-                                        ascii_frame = "```\n"
-                                        for row in gray:
-                                            for pixel in row:
-                                                char_idx = int(pixel / 25.6)
-                                                char_idx = min(char_idx, len(ascii_chars) - 1)
-                                                ascii_frame += ascii_chars[char_idx]
-                                            ascii_frame += "\n"
-                                        ascii_frame += "```"
-                                        
-                                        frames.append(ascii_frame)
-                                        saved_count += 1
-                                    frame_idx += 1
-                            cap.release()
-                        except Exception as ve:
-                            st.error(f"Error processing video file: {str(ve)}")
+                    cap = cv2.VideoCapture(tmp_path)
+                    
+                    # Character ramp: dense characters mimic bright values in code blocks
+                    ascii_ramp = " .:-=+*#%@" if not invert_contrast else "@%#*+=-:. "
+                    ramp_len = len(ascii_ramp)
+                    
+                    while True:
+                        ret, frame = cap.read()
+                        if not ret:
+                            break
+                            
+                        # Standardize color layout
+                        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                        orig_h, orig_w = gray.shape
                         
-                        if os.path.exists(temp_file_path):
-                            os.remove(temp_file_path)
-                else:
-                    st.error("Please upload a video file first.")
-                    st.stop()
-            
-            if not frames:
-                st.error("No valid frames extracted to run animation sequence.")
-                st.stop()
-                
+                        # Apply monospace text squish factor (0.55)
+                        computed_height = int(target_width * (orig_h / orig_w) * 0.55)
+                        computed_height = max(1, computed_height)
+                        
+                        # Explicit check against maximum character limits
+                        if (target_width + 1) * computed_height > 1900:
+                            st.warning("Resolution bound exceeds safe thresholds. Readjusting proportions down.")
+                            target_width = 35
+                            computed_height = int(target_width * (orig_h / orig_w) * 0.55)
+                        
+                        resized_frame = cv2.resize(gray, (target_width, computed_height))
+                        
+                        # Translate pixels into spatial text rows
+                        matrix_lines = []
+                        for row in resized_frame:
+                            line_chars = "".join([ascii_ramp[int(pixel / 256 * ramp_len)] for pixel in row])
+                            matrix_lines.append(line_chars)
+                            
+                        formatted_block = "```\n" + "\n".join(matrix_lines) + "\n```"
+                        frames.append(formatted_block)
+                        
+                    cap.release()
+                    os.unlink(tmp_path)
+                    
+                    if len(frames) == 0:
+                        st.error("No extractable visual frames discovered inside the uploaded asset.")
+                        is_engine_ready = False
+                    else:
+                        st.success(f"Parsed {len(frames)} frames successfully! Ready to render.")
+                        
+                except Exception as e:
+                    st.error(f"Engine failure during file conversion: {str(e)}")
+                    is_engine_ready = False
+        else:
+            is_engine_ready = False
+    else:
+        frames = animation_presets[selected_anim]
+
+    loop_count = st.slider("Animation Loops", 1, 10, 3)
+    frame_delay = st.slider("Frame Delay (Seconds)", 1.2, 3.0, 1.5, 
+                            help="Edits faster than 1.2s risk triggering heavy API 429 rate limit cool-downs.")
+
+    if st.button("🚀 Fire 2D Animation", use_container_width=True, disabled=not is_engine_ready):
+        if token and anim_ch and frames:
             h = get_headers(token)
             edit_url = f"https://discord.com/api/v9/channels/{anim_ch}/messages"
             
-            # Step 1: Send the first frame to establish the message container
+            # Step 1: Deploy base message hook frame
             first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]})
             
             if first_frame_res.status_code == 200:
                 msg_id = first_frame_res.json()["id"]
                 specific_msg_url = f"{edit_url}/{msg_id}"
-                
                 status_placeholder = st.empty()
                 
-                # Step 2: Loop through and patch the message content over time
+                # Step 2: Loop sequential frame mutations via PATCH
                 for current_loop in range(loop_count):
                     for frame_idx, frame_content in enumerate(frames):
-                        status_placeholder.write(f"🎬 Playing: Loop {current_loop + 1} | Frame {frame_idx + 1}")
+                        status_placeholder.write(f"🎬 Playing: Loop {current_loop + 1} | Frame {frame_idx + 1}/{len(frames)}")
                         
                         res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content})
                         
