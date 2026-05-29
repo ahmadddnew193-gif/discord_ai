@@ -88,12 +88,12 @@ with st.sidebar:
     if admin_input == MASTER_KEY:
         col_gen, col_rev = st.columns(2)
         with col_gen:
-            if st.button("🎲 Generate Code"):
+            if st.button("🎲 Generate Code", key="btn_gen_code"):
                 new_code = str(random.randint(100000, 999999))
                 set_global_code(new_code)
                 st.success(f"CODE: {new_code}")
         with col_rev:
-            if st.button("🚫 Revoke All"):
+            if st.button("🚫 Revoke All", key="btn_revoke_all"):
                 if os.path.exists(CODE_FILE):
                     os.remove(CODE_FILE)
                 st.session_state.access_granted = False
@@ -104,7 +104,7 @@ with st.sidebar:
     
     if not st.session_state.access_granted:
         user_code_attempt = st.text_input("Enter 6-Digit Access Code")
-        if st.button("Unlock System"):
+        if st.button("Unlock System", key="btn_unlock_sys"):
             current_valid_code, _ = get_global_code()
             if current_valid_code and user_code_attempt == current_valid_code:
                 st.session_state.access_granted = True
@@ -312,12 +312,12 @@ with tabs[0]:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
+        if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True, key="btn_launch_bot"):
             st.session_state.bot_running = True
             st.session_state.bot_start_time = time.time()
             st.rerun()
     with c2:
-        if st.button("🛑 Stop Bot", use_container_width=True):
+        if st.button("🛑 Stop Bot", use_container_width=True, key="btn_stop_bot"):
             st.session_state.bot_running = False
             st.rerun()
 
@@ -343,70 +343,164 @@ with tabs[0]:
             time.sleep(poll_speed)
             st.rerun()
 
-# --- TAB 21: BIO ANIMATOR ---
-with tabs[20]:
-    st.header("🌀 Bio Animator")
-    st.info("Rotates your bio text. Warning: Changing too fast may lead to a temporary rate limit.")
-    bio_frames = st.text_area("Bio Frames (One per line)", "Coding...\nDeveloping...\nDiscord Hacking...")
-    anim_speed = st.slider("Animation Speed (Seconds)", 30, 300, 60)
-    
-    if st.button("▶️ Start Bio Animation", use_container_width=True):
-        st.session_state.bio_anim_active = True
-    if st.button("🛑 Stop Animation", use_container_width=True):
-        st.session_state.bio_anim_active = False
+# --- TAB 2: CHANNEL HISTORY SCRAPER ---
+with tabs[1]:
+    st.header("📥 Channel History Scraper")
+    limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
+    if st.button("🔍 Scrape", key="btn_scrape_hist"):
+        res = requests.get(f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}", headers=get_headers(token))
+        if res.status_code == 200: st.dataframe(pd.DataFrame([{"Author": m['author']['username'], "Content": m['content']} for m in res.json()]))
 
-    if st.session_state.bio_anim_active and token:
-        frames = [f.strip() for f in bio_frames.split("\n") if f.strip()]
-        if frames:
-            current_frame = frames[int(time.time() / anim_speed) % len(frames)]
-            requests.patch("https://discord.com/api/v9/users/@me", headers=get_headers(token), json={"bio": current_frame})
-            st.write(f"Current Bio: **{current_frame}**")
-            time.sleep(10) # Internal buffer
-            st.rerun()
+# --- TAB 3: PERSISTENT MEMORY ---
+with tabs[2]:
+    st.header("🧠 Persistent Memory")
+    if os.path.exists(MEMORY_FILE):
+        with open(MEMORY_FILE, "r") as f:
+            try: st.json(json.load(f))
+            except: st.error("Memory file corrupted.")
+    if st.button("Clear Memory File", key="btn_clear_mem"):
+        if os.path.exists(MEMORY_FILE): os.remove(MEMORY_FILE)
+        st.success("Memory Nuked.")
 
-# --- TAB 22: GHOST PINGER ---
-with tabs[21]:
-    st.header("👻 Ghost Pinger")
-    st.info("Sends a mention and deletes it immediately. The target gets a notification but can't see the message.")
-    ghost_target_id = st.text_input("User ID to Ghost Ping")
-    ghost_ch_id = st.text_input("Channel ID", value=channel_id_input, key="ghost_ping_ch")
-    
-    if st.button("💀 Fire Ghost Ping", use_container_width=True):
-        if token and ghost_target_id:
+# --- TAB 4: SERVER HARVESTER ---
+with tabs[3]:
+    st.header("🌾 Server Harvester")
+    target_guild = st.text_input("Target Server ID")
+    if st.button("📥 Harvest Emojis", key="btn_harvest_emojis"):
+        res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild}", headers=get_headers(token)).json()
+        if 'emojis' in res:
+            for e in res['emojis']:
+                url = f"https://cdn.discordapp.com/emojis/{e['id']}.png"
+                st.image(url, width=64, caption=f"{e['name']} (ID: {e['id']})")
+
+# --- TAB 5: FREE EMOJI ---
+with tabs[4]:
+    st.header("💎 Nitro-Free Emoji Spoofer")
+    target_ch = st.text_input("Target Channel ID", value=channel_id_input, key="emoji_ch")
+    emoji_id = st.text_input("Emoji ID")
+    is_animated = st.checkbox("Is Animated?")
+    if st.button("🚀 Send Emoji", use_container_width=True, key="btn_send_emoji"):
+        if emoji_id:
+            ext = "gif" if is_animated else "png"
+            emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=48"
+            requests.post(f"https://discord.com/api/v9/channels/{target_ch}/messages", headers=get_headers(token), json={"content": emoji_url})
+            st.success("Emoji Sent!")
+
+# --- TAB 6: SNOWFLAKE DECODER ---
+with tabs[5]:
+    st.header("❄️ Snowflake Age Decoder")
+    input_id = st.text_input("Enter User or Server ID")
+    if st.button("📅 Decode Timestamp", use_container_width=True, key="btn_decode_snowflake"):
+        if input_id.isdigit():
+            timestamp = (int(input_id) >> 22) + 1420070400000
+            date_obj = datetime.fromtimestamp(timestamp / 1000.0)
+            st.success(f"Creation Date: **{date_obj.strftime('%Y-%m-%d %H:%M:%S')} UTC**")
+
+# --- TAB 7: APP HUNTER ---
+with tabs[6]:
+    st.header("📱 Authorized App Hunter")
+    if st.button("🔍 Scan Applications", use_container_width=True, key="btn_scan_apps"):
+        if token:
+            apps = requests.get("https://discord.com/api/v9/oauth2/tokens", headers=get_headers(token)).json()
+            if apps:
+                for a in apps:
+                    app_name = a.get('application', {}).get('name', 'Unknown')
+                    with st.expander(f"📲 {app_name}"): st.write(f"**Scopes:** `{', '.join(a.get('scopes', []))}`")
+
+# --- TAB 8: VC LURKER ---
+with tabs[7]:
+    st.header("🎙️ VC Lurker (Direct Scan)")
+    target_guild_id = st.text_input("Server ID", key="lurker_guild")
+    target_vc_id = st.text_input("Specific Voice Channel ID", key="lurker_vc")
+    if st.button("📡 Scan Voice Channel", use_container_width=True, key="btn_scan_vc"):
+        if token and target_guild_id and target_vc_id:
             h = get_headers(token)
-            ping_url = f"https://discord.com/api/v9/channels/{ghost_ch_id}/messages"
-            res = requests.post(ping_url, headers=h, json={"content": f"<@{ghost_target_id}>"})
+            res = requests.get(f"https://discord.com/api/v9/channels/{target_vc_id}", headers=h)
             if res.status_code == 200:
-                msg_id = res.json()['id']
-                requests.delete(f"{ping_url}/{msg_id}", headers=h)
-                st.success("Ghost Ping Delivered.")
+                mem_res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild_id}/members?limit=100", headers=h)
+                if mem_res.status_code == 200:
+                    members = mem_res.json()
+                    found = [{"User": m['user']['username'], "ID": m['user']['id']} for m in members if 'user' in m]
+                    st.table(pd.DataFrame(found))
 
-# --- TAB 23: SERVER CLONER ---
-with tabs[22]:
-    st.header("📋 Server Structure Cloner")
-    st.info("Exports all channel names, categories, and roles from a server to a JSON file.")
-    clone_guild_id = st.text_input("Server (Guild) ID to Clone")
-    
-    if st.button("📂 Export Server Structure", use_container_width=True):
-        if token and clone_guild_id:
+# --- TAB 9: SOUNDBOARD SPOOFER ---
+with tabs[8]:
+    st.header("🔊 Soundboard Anywhere Spoofer")
+    sound_ch_id = st.text_input("Voice Channel ID", value=channel_id_input)
+    sound_id = st.text_input("Sound ID")
+    sound_guild_id = st.text_input("Source Server ID")
+    if st.button("🔊 Fire Sound", use_container_width=True, key="btn_fire_sound"):
+        if token and sound_ch_id and sound_id:
             h = get_headers(token)
-            guild_data = requests.get(f"https://discord.com/api/v9/guilds/{clone_guild_id}", headers=h).json()
-            channels = requests.get(f"https://discord.com/api/v9/guilds/{clone_guild_id}/channels", headers=h).json()
-            
-            clone_package = {
-                "name": guild_data.get("name"),
-                "roles": guild_data.get("roles"),
-                "channels": channels
-            }
-            st.download_button("Download Clone JSON", data=json.dumps(clone_package, indent=4), file_name=f"clone_{clone_guild_id}.json")
+            sb_url = f"https://discord.com/api/v9/channels/{sound_ch_id}/voice-channel-effects"
+            res = requests.post(sb_url, headers=h, json={"sound_id": sound_id, "source_guild_id": sound_guild_id if sound_guild_id else None})
+            if res.status_code == 204: st.success("Sound Played!")
 
-# --- OTHER TABS ---
+# --- TAB 10: HYPESQUAD ---
+with tabs[9]:
+    st.header("✨ HypeSquad Spoofer")
+    house = st.selectbox("House", ["Bravery", "Brilliance", "Balance"])
+    house_map = {"Bravery": 1, "Brilliance": 2, "Balance": 3}
+    if st.button("Apply", key="btn_apply_hypesquad"):
+        requests.post("https://discord.com/api/v9/hypesquad/online", headers=get_headers(token), json={"house_id": house_map[house]})
+        st.success("House Applied")
+
+# --- TAB 11: ACCOUNT AUDIT ---
+with tabs[10]:
+    st.header("🔍 Account Auditor")
+    if st.button("Run Audit", key="btn_run_audit"):
+        u_res = requests.get("https://discord.com/api/v9/users/@me", headers=get_headers(token)).json()
+        st.json(u_res)
+
+# --- TAB 12: WEBHOOK COMMANDER ---
+with tabs[11]:
+    st.header("📢 Webhook Commander")
+    wh_url = st.text_input("Webhook URL")
+    wh_msg = st.text_area("Message content")
+    if st.button("Fire", key="btn_fire_webhook"): requests.post(wh_url, json={"content": wh_msg})
+
+# --- TAB 13: MESSAGE GHOSTER ---
+with tabs[12]:
+    st.header("👻 Message Ghoster")
+    ghost_ch = st.text_input("Target Channel ID", value=channel_id_input, key="ghost_ch")
+    ghost_limit = st.number_input("Scan Limit", min_value=1, max_value=500, value=50)
+    if st.button("🔥 Purge My Messages", use_container_width=True, key="btn_purge_msgs"):
+        if my_id:
+            h = get_headers(token)
+            msgs = requests.get(f"https://discord.com/api/v9/channels/{ghost_ch}/messages?limit={ghost_limit}", headers=h).json()
+            for m in msgs:
+                if m['author']['id'] == my_id:
+                    requests.delete(f"https://discord.com/api/v9/channels/{ghost_ch}/messages/{m['id']}", headers=h)
+                    time.sleep(1.2)
+
+# --- TAB 14: TEXT COLOR ---
+with tabs[13]:
+    st.header("🎨 ANSI Color Painter")
+    color_text = st.text_input("Your Message")
+    color_choice = st.selectbox("Color", ["Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"])
+    color_codes = {"Red": "31", "Green": "32", "Yellow": "33", "Blue": "34", "Magenta": "35", "Cyan": "36", "White": "37"}
+    if st.button("🖌️ Send Colored Text", use_container_width=True, key="btn_send_ansi"):
+        code = color_codes[color_choice]
+        ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
+        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload})
+
+# --- TAB 15: INFINITE TYPING ---
+with tabs[14]:
+    st.header("⏳ Infinite Typing Indicator")
+    if st.button("🚀 Start Infinite Typing", use_container_width=True, key="btn_start_typing"): st.session_state.typing_active = True
+    if st.button("🛑 Stop Typing", use_container_width=True, key="btn_stop_typing"): st.session_state.typing_active = False
+    if st.session_state.typing_active:
+        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/typing", headers=get_headers(token))
+        time.sleep(random.randint(5, 8))
+        st.rerun()
+
+# --- TAB 16: OSINT SEARCH ---
 with tabs[15]:
     st.header("🔎 OSINT Search Engine")
     q_col, t_col = st.columns([3, 1])
     with q_col: search_query = st.text_input("Enter search query")
     with t_col: search_type = st.selectbox("Search Scope", ["Web", "News", "Images"])
-    if st.button("Execute Intelligence Search", use_container_width=True):
+    if st.button("Execute Intelligence Search", use_container_width=True, key="btn_osint_search"):
         if search_query:
             with DDGS() as ddgs:
                 if search_type == "Web":
@@ -428,6 +522,7 @@ with tabs[15]:
                     for i, res in enumerate(results):
                         with cols[i % 2]: st.image(res['image'], caption=res['title'])
 
+# --- TAB 17: STATUS SPOOFER ---
 with tabs[16]:
     st.header("🎭 Rich Presence (NTTS Style)")
     app_id = st.text_input("Application (Client) ID", placeholder="1234567890...")
@@ -443,7 +538,7 @@ with tabs[16]:
         b1_url = st.text_input("Button 1 URL", value="https://youtube.com")
         act_status = st.selectbox("Appearance", ["online", "idle", "dnd", "invisible"], key="ntts_status")
 
-    if st.button("✨ Apply NTTS Presence", use_container_width=True):
+    if st.button("✨ Apply NTTS Presence", use_container_width=True, key="btn_apply_presence"):
         if token and app_id:
             headers = get_headers(token)
             payload = {"status": act_status, "activities": [{"type": 0, "application_id": app_id, "name": game_name, "details": details, "assets": {"large_image": large_image_key, "large_text": large_text}, "buttons": [b1_label], "metadata": {"button_urls": [b1_url]}}]}
@@ -451,22 +546,24 @@ with tabs[16]:
             if res.status_code == 200: st.success("Presence Applied!")
             else: st.error(f"Error: {res.text}")
 
+# --- TAB 18: STICKER SPOOFER ---
 with tabs[17]:
     st.header("🖼️ Nitro Sticker Spoofer")
     stick_ch = st.text_input("Target Channel ID", value=channel_id_input, key="sticker_ch")
     stick_id = st.text_input("Sticker ID")
-    if st.button("🚀 Send Spoofed Sticker", use_container_width=True):
+    if st.button("🚀 Send Spoofed Sticker", use_container_width=True, key="btn_send_sticker"):
         if stick_id and token:
             h = get_headers(token)
             sticker_url = f"https://cdn.discordapp.com/stickers/{stick_id}.png?size=160"
             requests.post(f"https://discord.com/api/v9/channels/{stick_ch}/messages", headers=h, json={"content": sticker_url})
             st.success("Sticker Sent!")
 
+# --- TAB 19: LARGE FILE BRIDGE ---
 with tabs[18]:
     st.header("📦 Large File Bridge")
     file_ch = st.text_input("Target Channel ID", value=channel_id_input, key="file_ch")
     uploaded_file = st.file_uploader("Select File")
-    if st.button("📤 Upload & Send Link", use_container_width=True):
+    if st.button("📤 Upload & Send Link", use_container_width=True, key="btn_upload_bridge"):
         if uploaded_file and token:
             with st.spinner("Bridging file..."):
                 try:
@@ -477,249 +574,185 @@ with tabs[18]:
                     st.success("Sent!")
                 except: st.error("Bridge failure.")
 
+# --- TAB 20: INVISIBLE IDENTITY ---
 with tabs[19]:
     st.header("👻 Invisible Identity")
     st.code("\u17b5", language="text")
-    if st.button("Apply Invisible Bio"):
+    if st.button("Apply Invisible Bio", key="btn_apply_inv_bio"):
         if token:
             requests.patch("https://discord.com/api/v9/users/@me", headers=get_headers(token), json={"bio": "\u17b5"})
             st.success("Bio Ghosted.")
 
-with tabs[1]:
-    st.header("📥 Channel History Scraper")
-    limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
-    if st.button("🔍 Scrape"):
-        res = requests.get(f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}", headers=get_headers(token))
-        if res.status_code == 200: st.dataframe(pd.DataFrame([{"Author": m['author']['username'], "Content": m['content']} for m in res.json()]))
+# --- TAB 21: BIO ANIMATOR ---
+with tabs[20]:
+    st.header("🌀 Bio Animator")
+    st.info("Rotates your bio text. Warning: Changing too fast may lead to a temporary rate limit.")
+    bio_frames = st.text_area("Bio Frames (One per line)", "Coding...\nDeveloping...\nDiscord Hacking...")
+    anim_speed = st.slider("Animation Speed (Seconds)", 30, 300, 60)
+    
+    if st.button("▶️ Start Bio Animation", use_container_width=True, key="btn_start_bio_anim"):
+        st.session_state.bio_anim_active = True
+    if st.button("🛑 Stop Animation", use_container_width=True, key="btn_stop_bio_anim"):
+        st.session_state.bio_anim_active = False
 
-with tabs[2]:
-    st.header("🧠 Persistent Memory")
-    if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, "r") as f:
-            try: st.json(json.load(f))
-            except: st.error("Memory file corrupted.")
-    if st.button("Clear Memory File"):
-        if os.path.exists(MEMORY_FILE): os.remove(MEMORY_FILE)
-        st.success("Memory Nuked.")
+    if st.session_state.bio_anim_active and token:
+        frames = [f.strip() for f in bio_frames.split("\n") if f.strip()]
+        if frames:
+            current_frame = frames[int(time.time() / anim_speed) % len(frames)]
+            requests.patch("https://discord.com/api/v9/users/@me", headers=get_headers(token), json={"bio": current_frame})
+            st.write(f"Current Bio: **{current_frame}**")
+            time.sleep(10) # Internal buffer
+            st.rerun()
 
-with tabs[3]:
-    st.header("🌾 Server Harvester")
-    target_guild = st.text_input("Target Server ID")
-    if st.button("📥 Harvest Emojis"):
-        res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild}", headers=get_headers(token)).json()
-        if 'emojis' in res:
-            for e in res['emojis']:
-                url = f"https://cdn.discordapp.com/emojis/{e['id']}.png"
-                st.image(url, width=64, caption=f"{e['name']} (ID: {e['id']})")
-
-with tabs[4]:
-    st.header("💎 Nitro-Free Emoji Spoofer")
-    target_ch = st.text_input("Target Channel ID", value=channel_id_input, key="emoji_ch")
-    emoji_id = st.text_input("Emoji ID")
-    is_animated = st.checkbox("Is Animated?")
-    if st.button("🚀 Send Emoji", use_container_width=True):
-        if emoji_id:
-            ext = "gif" if is_animated else "png"
-            emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=48"
-            requests.post(f"https://discord.com/api/v9/channels/{target_ch}/messages", headers=get_headers(token), json={"content": emoji_url})
-            st.success("Emoji Sent!")
-
-with tabs[5]:
-    st.header("❄️ Snowflake Age Decoder")
-    input_id = st.text_input("Enter User or Server ID")
-    if st.button("📅 Decode Timestamp", use_container_width=True):
-        if input_id.isdigit():
-            timestamp = (int(input_id) >> 22) + 1420070400000
-            date_obj = datetime.fromtimestamp(timestamp / 1000.0)
-            st.success(f"Creation Date: **{date_obj.strftime('%Y-%m-%d %H:%M:%S')} UTC**")
-
-with tabs[6]:
-    st.header("📱 Authorized App Hunter")
-    if st.button("🔍 Scan Applications", use_container_width=True):
-        if token:
-            apps = requests.get("https://discord.com/api/v9/oauth2/tokens", headers=get_headers(token)).json()
-            if apps:
-                for a in apps:
-                    app_name = a.get('application', {}).get('name', 'Unknown')
-                    with st.expander(f"📲 {app_name}"): st.write(f"**Scopes:** `{', '.join(a.get('scopes', []))}`")
-
-with tabs[7]:
-    st.header("🎙️ VC Lurker (Direct Scan)")
-    target_guild_id = st.text_input("Server ID", key="lurker_guild")
-    target_vc_id = st.text_input("Specific Voice Channel ID", key="lurker_vc")
-    if st.button("📡 Scan Voice Channel", use_container_width=True):
-        if token and target_guild_id and target_vc_id:
+# --- TAB 22: GHOST PINGER ---
+with tabs[21]:
+    st.header("👻 Ghost Pinger")
+    st.info("Sends a mention and deletes it immediately. The target gets a notification but can't see the message.")
+    ghost_target_id = st.text_input("User ID to Ghost Ping")
+    ghost_ch_id = st.text_input("Channel ID", value=channel_id_input, key="ghost_ping_ch")
+    
+    if st.button("💀 Fire Ghost Ping", use_container_width=True, key="btn_fire_ghost_ping"):
+        if token and ghost_target_id:
             h = get_headers(token)
-            res = requests.get(f"https://discord.com/api/v9/channels/{target_vc_id}", headers=h)
+            ping_url = f"https://discord.com/api/v9/channels/{ghost_ch_id}/messages"
+            res = requests.post(ping_url, headers=h, json={"content": f"<@{ghost_target_id}>"})
             if res.status_code == 200:
-                mem_res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild_id}/members?limit=100", headers=h)
-                if mem_res.status_code == 200:
-                    members = mem_res.json()
-                    found = [{"User": m['user']['username'], "ID": m['user']['id']} for m in members if 'user' in m]
-                    st.table(pd.DataFrame(found))
+                msg_id = res.json()['id']
+                requests.delete(f"{ping_url}/{msg_id}", headers=h)
+                st.success("Ghost Ping Delivered.")
 
-    with tabs[8]:
-        st.header("🔊 Soundboard Anywhere Spoofer")
-        sound_ch_id = st.text_input("Voice Channel ID", value=channel_id_input)
-        sound_id = st.text_input("Sound ID")
-        sound_guild_id = st.text_input("Source Server ID")
-        if st.button("🔊 Fire Sound", use_container_width=True):
-            if token and sound_ch_id and sound_id:
-                h = get_headers(token)
-                sb_url = f"https://discord.com/api/v9/channels/{sound_ch_id}/voice-channel-effects"
-                res = requests.post(sb_url, headers=h, json={"sound_id": sound_id, "source_guild_id": sound_guild_id if sound_guild_id else None})
-                if res.status_code == 204: st.success("Sound Played!")
-
-with tabs[9]:
-    st.header("✨ HypeSquad Spoofer")
-    house = st.selectbox("House", ["Bravery", "Brilliance", "Balance"])
-    house_map = {"Bravery": 1, "Brilliance": 2, "Balance": 3}
-    if st.button("Apply"):
-        requests.post("https://discord.com/api/v9/hypesquad/online", headers=get_headers(token), json={"house_id": house_map[house]})
-        st.success("House Applied")
-
-with tabs[10]:
-    st.header("🔍 Account Auditor")
-    if st.button("Run Audit"):
-        u_res = requests.get("https://discord.com/api/v9/users/@me", headers=get_headers(token)).json()
-        st.json(u_res)
-
-with tabs[11]:
-    st.header("📢 Webhook Commander")
-    wh_url = st.text_input("Webhook URL")
-    wh_msg = st.text_area("Message content")
-    if st.button("Fire"): requests.post(wh_url, json={"content": wh_msg})
-
-with tabs[12]:
-    st.header("👻 Message Ghoster")
-    ghost_ch = st.text_input("Target Channel ID", value=channel_id_input, key="ghost_ch")
-    ghost_limit = st.number_input("Scan Limit", min_value=1, max_value=500, value=50)
-    if st.button("🔥 Purge My Messages", use_container_width=True):
-        if my_id:
+# --- TAB 23: SERVER CLONER ---
+with tabs[22]:
+    st.header("📋 Server Structure Cloner")
+    st.info("Exports all channel names, categories, and roles from a server to a JSON file.")
+    clone_guild_id = st.text_input("Server (Guild) ID to Clone")
+    
+    if st.button("📂 Export Server Structure", use_container_width=True, key="btn_export_server"):
+        if token and clone_guild_id:
             h = get_headers(token)
-            msgs = requests.get(f"https://discord.com/api/v9/channels/{ghost_ch}/messages?limit={ghost_limit}", headers=h).json()
-            for m in msgs:
-                if m['author']['id'] == my_id:
-                    requests.delete(f"https://discord.com/api/v9/channels/{ghost_ch}/messages/{m['id']}", headers=h)
-                    time.sleep(1.2)
+            guild_data = requests.get(f"https://discord.com/api/v9/guilds/{clone_guild_id}", headers=h).json()
+            channels = requests.get(f"https://discord.com/api/v9/guilds/{clone_guild_id}/channels", headers=h).json()
+            
+            clone_package = {
+                "name": guild_data.get("name"),
+                "roles": guild_data.get("roles"),
+                "channels": channels
+            }
+            st.download_button("Download Clone JSON", data=json.dumps(clone_package, indent=4), file_name=f"clone_{clone_guild_id}.json", key="btn_download_clone_json")
 
-with tabs[13]:
-    st.header("🎨 ANSI Color Painter")
-    color_text = st.text_input("Your Message")
-    color_choice = st.selectbox("Color", ["Red", "Green", "Yellow", "Blue", "Magenta", "Cyan", "White"])
-    color_codes = {"Red": "31", "Green": "32", "Yellow": "33", "Blue": "34", "Magenta": "35", "Cyan": "36", "White": "37"}
-    if st.button("🖌️ Send Colored Text", use_container_width=True):
-        code = color_codes[color_choice]
-        ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
-        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload})
-
-with tabs[14]:
-    st.header("⏳ Infinite Typing Indicator")
-    if st.button("🚀 Start Infinite Typing", use_container_width=True): st.session_state.typing_active = True
-    if st.button("🛑 Stop Typing", use_container_width=True): st.session_state.typing_active = False
-    if st.session_state.typing_active:
-        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/typing", headers=get_headers(token))
-        time.sleep(random.randint(5, 8))
-        st.rerun()
-
-# --- NEW TAB: NITRO BADGE SPOOFER ---
+# --- TAB 24: NITRO BADGE SPOOFER ---
 with tabs[23]:
     st.header("💎 Nitro Badge Spoofer")
     st.warning("⚠️ Warning: Manipulating account flags is purely cosmetic and local to the API's response. Discord may reset these if they detect the mismatch.")
-    
     nitro_bit = 1 
-    
-    if st.button("✨ Apply Nitro Badge", use_container_width=True):
+    if st.button("✨ Apply Nitro Badge", use_container_width=True, key="btn_apply_nitro_badge"):
         if token:
             h = get_headers(token)
             user_data = requests.get("https://discord.com/api/v9/users/@me", headers=h).json()
             current_flags = user_data.get("flags", 0)
-            
             new_flags = current_flags | nitro_bit
-            
             res = requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": new_flags})
-            
             if res.status_code == 200:
                 st.success(f"Flags patched to: {new_flags}. Refresh your client/browser.")
             else:
                 st.error(f"Failed to patch: {res.status_code}")
 
-# --- NEW TAB: 2D TEXT ANIMATOR ---
+# --- TAB 25: 2D TEXT ANIMATOR ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
     st.info("Sends a text matrix and rapidly edits it frame-by-frame to create a live 2D flipbook animation in chat.")
     
     anim_ch = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     
+    # Pre-built frame animation matrices
     animation_presets = {
-        "💃 Deluxe Cyber Dance (Bad Girl Loop)": [
-            "```\n   ~  @  ~   \n    \\\\###/    \n     ###     \n    _/ \\_    \n   /     \\\\   \n```",
-            "```\n      _ @ /  \n     ~ ###   \n      /###   \n     _/  \\\\\\\\  \n    /     \\\\_ \n```",
-            "```\n     \\\\ @ _   \n      ### ~  \n      ###\\\\   \n     //  \\\\_  \n    _/     \\\\ \n```",
-            "```\n       _@_   \n     ((###)) \n      -###-  \n      _//\\\\\\\\_ \n     /      \\\\\n```",
-            "```\n     ~  @  ~ \n      \\\\###/  \n       ###   \n      _// \\_ \n     /     _\\\\\n```",
-            "```\n        @ /  \n     \\\\_###~  \n      /###   \n     _/  \\_  \n    /      \\\\\n```"
+        "💃 Cyber Punk Dance Loop": [
+            "```\n  \\ \n  \\\\(@)~ \n   ###   \n  _// \\_ \n```",
+            "```\n        \n    (@)/ \n   /###  \n  _/  \\  \n```",
+            "```\n        \n   _@_   \n  (###)  \n  _/ \\_  \n```",
+            "```\n        \n   \\(@)  \n    ###\\ \n    /  \\_\n```",
+            "```\n        \n  ~(@)~  \n   ###   \n  _// \\_ \n```",
+            "```\n        \n   _(@)_ \n  / ### \\\n  /   \\\n```"
         ],
-        "🌀 Hypnotic Cyber Vortex": [
-            "```\n    .::###::.   \n  ::@@@@@@@@@:: \n :##~~~@~~~##: \n  ::@@@@@@@@@:: \n    '::###::'   \n```",
-            "```\n    .::@@@::.   \n  ::#########:: \n :@@~~~#~~~@@: \n  ::#########:: \n    '::@@@::'   \n```",
-            "```\n    .::~~~::.   \n  ::@@@###@@@:: \n :###~~@~~###: \n  ::@@@###@@@:: \n    '::~~~::'   \n```",
-            "```\n    .::###::.   \n  ::~@~@~@~@~:: \n :@@@##~##@@@: \n  ::~@~@~@~@~:: \n    '::###::'   \n```"
+        "⚽ Bouncing Ball": [
+            "```\n[○      ]\n```",
+            "```\n[  ○    ]\n```",
+            "```\n[    ○  ]\n```",
+            "```\n[      ○]\n```",
+            "```\n[    ○  ]\n```",
+            "```\n[  ○    ]\n```"
         ],
-        "🦅 Cyber Phoenix Flight": [
-            "```\n     ___ @ ___    \n  \\\\\\\\\\\\  (###)  /// \n   \\\\\\\\\\\\  ###  ///  \n     \\\\\\\\_ V _//    \n       \\_|_/      \n```",
-            "```\n     ___ @ ___    \n  ~~~\\\\  (###)  /~~~\n   ~~~\\\\  ###  /~~~ \n       \\_V_/      \n        \\\\|/       \n```",
-            "```\n       _ @ _      \n     /  (###)  \\\\  \n    /   /###\\\\   \\\\ \n   /   // V \\\\\\\\   \\\\\n       \\\\\\\\_|_//    \n```",
-            "```\n     ___ @ ___    \n  ///   (###)   \\\\\\\\\\\\\n ///    /###\\\\    \\\\\\\\\\\\\n       // V \\\\\\\\    \n      /// | \\\\\\\\\\\\   \n```"
+        "🤖 Robot Face Blink": [
+            "```\n  [ O _ O ] \n   /|___|\\  \n```",
+            "```\n  [ - _ - ] \n   /|___|\\  \n```",
+            "```\n  [ O _ O ] \n   /|___|\\  \n```",
+            "```\n  [ > _ < ] \n   /|___|\\  \n```"
         ],
-        "⚔️ Neon Blade Kata": [
-            "```\n    _@_  ///     \n   (###)=##>     \n   /###\\\\         \n  _/   \\_        \n /       \\\\       \n```",
-            "```\n     _@_         \n    (###)        \n   //###\\\\\\\\  |    \n  _/   _//==#==> \n /    /     |    \n```",
-            "          _@_    \n  <##=(###)    \n       /###\\\\     \n      _/   \\_    \n     /       \\\\   \n```",
-            "```\n     \\\\ _@_ /     \n      (###)      \n       ###       \n      _//\\\\\\\\_     \n     /      \\\\    \n```"
+        "📡 Loading Radar": [
+            "```\n   ⏱️ [|] Loading\n```",
+            "```\n   ⏱️ [/] Loading.\n```",
+            "```\n   ⏱️ [-] Loading..\n```",
+            "```\n   ⏱️ [\\] Loading...\n```"
         ],
-        "🤖 Advanced Neuro-Face (Reactive)": [
-            "```\n ╔═════════════╗ \n ║  ◤ @ _ @ ◥  ║ \n ║   \\\\_###_/   ║ \n ╚═════════════╝ \n```",
-            "```\n ╔═════════════╗ \n ║  ◣ ▰ _ ▰ ◢  ║ \n ║   \\\\_===_/   ║ \n ╚═════════════╝ \n```",
-            "```\n ╔═════════════╗ \n ║  ◤ # _ # ◥  ║ \n ║   \\\\_@@@_/   ║ \n ╚═════════════╝ \n```",
-            "```\n ╔═════════════╗ \n ║  ◣ - _ - ◢  ║ \n ║   \\\\_===_/   ║ \n ╚═════════════╝ \n```"
+        "😈 Serial Designation V (Rogue Drone Mood Logic)": [
+            "```\n   /===============\\\n  ||   [ >   < ]   ||\n   \\=======_=======/\n          /|\\\n```",
+            "```\n   /===============\\\n  ||   [ 💛 _ 💛 ]  ||\n   \\=======_=======/\n          /|\\\n```",
+            "```\n   /===============\\\n  ||   [ X   X ]   ||\n   \\=======_=======/\n          /|\\\n```",
+            "```\n   /===============\\\n  ||   [ 👁️ _ 👁️ ]  ||\n   \\=======_=======/\n          /|\\\n```"
+        ],
+        "⎋ Absolute Solver Hex Pulse": [
+            "```\n   .---.\n  (  X  )\n   '---'\n```",
+            "```\n  .-/|\\-.\n <  -X-  >\n  .-?\\|/-.\n```",
+            "```\n /===\\|/===\\\\ \n||  - X -  ||\n \\===/|\\===/\n```",
+            "```\n  .-/|\\-.\n <  -X-  >\n  .-?\\|/-.\n```"
+        ],
+        "🌊 Smooth Digital Sine Wave": [
+            "```\n~        \n ~      \n  ~    ~\n   ~~~~ \n```",
+            "```\n ~      \n  ~    ~\n   ~~~~ \n~       \n```",
+            "```\n  ~    ~\n   ~~~~ \n~       \n ~      \n```",
+            "```\n   ~~~~ \n~       \n ~      \n  ~    ~\n```"
         ]
     }
     
-    selected_anim = st.selectbox("Select Advanced ASCII Preset", list(animation_presets.keys()))
-    anim_speed = st.slider("Frame Delay (Seconds)", 1.0, 5.0, 1.2, help="Keep at or above 1.2s to avoid Discord 429 rate limits.")
+    selected_anim = st.selectbox("Choose Animation Preset", list(animation_presets.keys()))
+    loop_count = st.slider("Animation Loops", 1, 10, 3)
     
-    if "anim_active" not in st.session_state: st.session_state.anim_active = False
-    if "anim_msg_id" not in st.session_state: st.session_state.anim_msg_id = None
-    if "anim_frame_idx" not in st.session_state: st.session_state.anim_frame_idx = 0
-    
-    c1, c2 = st.columns(2)
-    with c1:
-        if st.button("▶️ Start Animation", use_container_width=True):
-            st.session_state.anim_active = True
-            st.session_state.anim_msg_id = None
-            st.session_state.anim_frame_idx = 0
-            st.rerun()
-    with c2:
-        if st.button("🛑 Stop Animation", use_container_width=True):
-            st.session_state.anim_active = False
-            st.session_state.anim_msg_id = None
-            st.rerun()
+    # Safety delay: Discord heavily rate-limits (429) rapid message edits.
+    frame_delay = st.slider("Frame Delay (Seconds)", 1.2, 3.0, 1.5, 
+                        help="Faster speeds look smoother but increase the risk of API rate limits.")
+
+    if st.button("🚀 Fire 2D Animation", use_container_width=True, key="btn_fire_2d_anim"):
+        if token and anim_ch:
+            frames = animation_presets[selected_anim]
+            h = get_headers(token)
+            edit_url = f"https://discord.com/api/v9/channels/{anim_ch}/messages"
             
-    if st.session_state.anim_active and token and anim_ch:
-        frames = animation_presets[selected_anim]
-        idx = st.session_state.anim_frame_idx % len(frames)
-        current_frame = frames[idx]
-        h = get_headers(token)
-        
-        if st.session_state.anim_msg_id is None:
-            res = requests.post(f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){anim_ch}/messages", headers=h, json={"content": current_frame})
-            if res.status_code == 200:
-                st.session_state.anim_msg_id = res.json()['id']
-        else:
-            requests.patch(f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){anim_ch}/messages/{st.session_state.anim_msg_id}", headers=h, json={"content": current_frame})
+            # Step 1: Send the first frame to establish the message container
+            first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]})
             
-        st.session_state.anim_frame_idx += 1
-        time.sleep(anim_speed)
-        st.rerun()
-        
+            if first_frame_res.status_code == 200:
+                msg_id = first_frame_res.json()["id"]
+                specific_msg_url = f"{edit_url}/{msg_id}"
+                
+                # UI progress indicator on the website
+                status_placeholder = st.empty()
+                
+                # Step 2: Loop through and patch the message content over time
+                for current_loop in range(loop_count):
+                    for frame_idx, frame_content in enumerate(frames):
+                        status_placeholder.write(f"🎬 Playing: Loop {current_loop + 1} | Frame {frame_idx + 1}")
+                        
+                        # PATCH updates the existing message instantly for everyone
+                        res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content})
+                        
+                        if res.status_code == 429:
+                            # Auto-handling rate limits if they happen
+                            retry_after = res.json().get("retry_after", 2)
+                            status_placeholder.warning(f"⏳ Rate limited. Cooling down for {retry_after}s...")
+                            time.sleep(retry_after)
+                        
+                        time.sleep(frame_delay)
+                
+                status_placeholder.success("✨ Animation sequence finished running successfully!")
+            else:
+                st.error(f"Failed to initiate animation: {first_frame_res.text}")
