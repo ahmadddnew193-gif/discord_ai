@@ -659,28 +659,41 @@ with tabs[24]:
     anim_ch = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     
     # Pre-built frame animation matrices
-    animation_presets = {
-        "⚽ Bouncing Ball": [
-            "```\n[○      ]\n```",
-            "```\n[  ○    ]\n```",
-            "```\n[    ○  ]\n```",
-            "```\n[      ○]\n```",
-            "```\n[    ○  ]\n```",
-            "```\n[  ○    ]\n```"
-        ],
-        "🤖 Robot Face Blink": [
-            "```\n  [ O _ O ] \n   /|___|\\  \n```",
-            "```\n  [ - _ - ] \n   /|___|\\  \n```",
-            "```\n  [ O _ O ] \n   /|___|\\  \n```",
-            "```\n  [ > _ < ] \n   /|___|\\  \n```"
-        ],
-        "📡 Loading Radar": [
-            "```\n   ⏱️ [|] Loading\n```",
-            "```\n   ⏱️ [/] Loading.\n```",
-            "```\n   ⏱️ [-] Loading..\n```",
-            "```\n   ⏱️ [\\] Loading...\n```"
-        ]
-    }
+    # Pre-built frame animation matrices
+        animation_presets = {
+            "💃 Cyber Punk Dance Loop": [
+                "```\n  \\ \n  \\\\(@)~ \n   ###   \n  _// \\_ \n```",
+                "```\n        \n    (@)/ \n   /###  \n  _/  \\  \n```",
+                "```\n        \n   _@_   \n  (###)  \n  _/ \\_  \n```",
+                "```\n        \n   \\(@)  \n    ###\\ \n    /  \\_\n```",
+                "```\n        \n  ~(@)~  \n   ###   \n  _// \\_ \n```",
+                "```\n        \n   _(@)_ \n  / ### \\\n   /   \\\n```"
+            ],
+            "⚽ Bouncing Ball": [
+                "```\n[○      ]\n```",
+                "```\n[  ○    ]\n```",
+                "```\n[    ○  ]\n
+    ```",
+                "```\n[      ○]\n```",
+                "```\n[    ○  ]\n```",
+                "```\n[  ○    ]\n```"
+            ],
+            "🤖 Robot Face Blink": [
+                "```\n  [ O _ O ] \n   /|___|\\  \n```",
+                "```\n  [ - _ - ] \n   /|___|\\  \n
+    ```",
+                "```\n  [ O _ O ] \n   /|___|\\  \n```",
+                "```\n  [ > _ < ] \n   /|___|\\  \n```"
+            ],
+            "📡 Loading Radar": [
+                "```\n   ⏱️ [|] Loading\n
+    ```",
+                "```\n   ⏱️ [/] Loading.\n```",
+                "```\n   ⏱️ [-] Loading..\n
+    ```",
+                "```\n   ⏱️ [\\] Loading...\n```"
+            ]
+        }
     
     selected_anim = st.selectbox("Choose Animation Preset", list(animation_presets.keys()))
     loop_count = st.slider("Animation Loops", 1, 10, 3)
