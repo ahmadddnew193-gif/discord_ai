@@ -310,7 +310,7 @@ with tabs[0]:
             time.sleep(poll_speed)
             st.rerun()
 
-# --- OTHER STANDARD TABS ---
+# --- STANDARD BACKEND PIPELINE TABS ---
 with tabs[1]:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
@@ -501,7 +501,7 @@ with tabs[23]:
         requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": u_data.get("flags", 0) | 1})
         st.success("Cosmetic flag applied.")
 
-# --- TAB 25: 2D TEXT ANIMATOR (WITH DYNAMIC DETAIL ENHANCEMENT ENGINE) ---
+# --- TAB 25: 2D TEXT ANIMATOR (WITH DITHERING & ERROR DIFFUSION PIPELINE) ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
     st.info("Sends a text matrix and rapidly edits it frame-by-frame to create a live 2D flipbook animation in chat.")
@@ -511,11 +511,7 @@ with tabs[24]:
     animation_presets = {
         "💃 Cyber Punk Dance Loop": [
             "```\n  \\ \n  \\\\(@)~ \n    ###   \n  _// \\_ \n```",
-            "```\n        \n    (@)/ \n   /###  \n  _/  \\  \n```",
-            "```\n        \n   _@_   \n  (###)  \n  _/ \\_  \n```"
-        ],
-        "🤖 Robot Face Blink": [
-            "```\n  [ O _ O ] \n   /|___|\\  \n```", "```\n  [ - _ - ] \n   /|___|\\  \n```"
+            "```\n        \n    (@)/ \n   /###  \n  _/  \\  \n```"
         ]
     }
     
@@ -528,19 +524,25 @@ with tabs[24]:
     if selected_anim == "📁 Upload Custom GIF":
         custom_gif = st.file_uploader("Upload an animated .gif file", type=["gif"])
         
-        col_w, col_inv, col_det = st.columns(3)
+        col_w, col_inv, col_dith = st.columns(3)
         with col_w:
-            max_cols = st.slider("Target Max Width (Columns)", min_value=15, max_value=60, value=42, 
-                                help="40-45 columns avoids broken layout wrapping on standard screens.")
+            max_cols = st.slider("Target Max Width (Columns)", min_value=15, max_value=60, value=45)
         with col_inv:
             invert_contrast = st.toggle("Invert Text Contrast", value=False)
-        with col_det:
-            detail_mode = st.selectbox("Detail Enhancement Engine", 
-                                       ["✨ High Detail (Adaptive)", "📐 Crisp Outline Mode", "⚙️ Standard Direct Mapping"],
-                                       help="Adaptive Mode uses CLAHE tile mapping to process sharp micro-details.")
+        with col_dith:
+            use_dithering = st.toggle("✨ Floyd-Steinberg Dithering", value=True, 
+                                      help="Spreads out rounding errors across pixels to make textures and hidden micro-details pop out clearly.")
             
+        col_br, col_co, col_style = st.columns(3)
+        with col_br:
+            brightness_val = st.slider("Brightness Correction", -100, 100, 0)
+        with col_co:
+            contrast_val = st.slider("Contrast Multiplier", 0.5, 3.0, 1.2)
+        with col_style:
+            char_style = st.selectbox("Character Set", ["Blocks (Solid Shape)", "Standard ASCII", "Extended Fidelity"])
+
         if custom_gif is not None:
-            with st.spinner("Analyzing frame arrays and running detail extraction matrix..."):
+            with st.spinner("Executing dynamic frame dither & contrast equalization matrix..."):
                 try:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".gif") as tmp:
                         tmp.write(custom_gif.getvalue())
@@ -564,17 +566,21 @@ with tabs[24]:
                             safe_width = max_cols
                             
                         safe_height = max(1, int(safe_width * aspect_ratio_modifier))
-                        
                         while (safe_width + 1) * safe_height + 8 > 1950:
                             safe_width -= 1
                             safe_height = max(1, int(safe_width * aspect_ratio_modifier))
                         
-                        st.caption(f"📐 Canvas Grid Auto-Locked: **{safe_width}x{safe_height}** blocks.")
+                        st.caption(f"📐 Canvas Grid Resolution Auto-Locked to: **{safe_width}x{safe_height}** characters.")
                         
-                        # High fidelity character map ramp 
-                        ascii_ramp = " .:-=+*#%@" if not invert_contrast else "@%#*+=-:. "
+                        # Set Up Character Mapping System
+                        if char_style == "Blocks (Solid Shape)":
+                            ascii_ramp = " ░▒▓█" if not invert_contrast else "█▓▒░ "
+                        elif char_style == "Extended Fidelity":
+                            ascii_ramp = " .'-^,:;=!*#$@█" if not invert_contrast else "█@$#*!=;:,-^'-. "
+                        else:
+                            ascii_ramp = " .:-=+*#%@" if not invert_contrast else "@%#*+=-:. "
+                            
                         ramp_len = len(ascii_ramp)
-                        
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         
                         while True:
@@ -583,26 +589,48 @@ with tabs[24]:
                                 
                             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                             
-                            # --- DETAIL ENHANCEMENT PIPELINE ---
-                            if detail_mode == "✨ High Detail (Adaptive)":
-                                # Local Contrast Optimization via adaptive grid tiles (restores hidden midtones)
-                                clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(6,6))
-                                gray = clahe.apply(gray)
-                            elif detail_mode == "📐 Crisp Outline Mode":
-                                # Canny edge array to isolate structural lines explicitly
-                                edges = cv2.Canny(gray, 40, 130)
-                                gray = cv2.bitwise_not(edges) if invert_contrast else edges
-                            else:
-                                # Standard global stretching normalization
-                                gray = cv2.normalize(gray, None, 0, 255, cv2.NORM_MINMAX)
+                            # Apply Brightness and Contrast Enhancements
+                            gray = cv2.convertScaleAbs(gray, alpha=contrast_val, beta=brightness_val)
+                            
+                            # Equalize local region histograms
+                            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(5,5))
+                            gray = clahe.apply(gray)
                             
                             resized = cv2.resize(gray, (safe_width, safe_height), interpolation=cv2.INTER_AREA)
-                            
                             matrix_lines = []
-                            for row in resized:
-                                line_chars = "".join([ascii_ramp[int((pixel / 256.0) * ramp_len)] for pixel in row])
-                                matrix_lines.append(line_chars)
+                            
+                            if use_dithering:
+                                # FLOYD-STEINBERG ERROR DIFFUSION PIPELINE
+                                dither_buffer = resized.astype(float)
+                                h, w = dither_buffer.shape
                                 
+                                for y in range(h):
+                                    line_chars = []
+                                    for x in range(w):
+                                        old_pixel = max(0.0, min(255.0, dither_buffer[y, x]))
+                                        
+                                        # Match pixel value smoothly to font scale range
+                                        ramp_idx = int((old_pixel / 255.0) * (ramp_len - 1) + 0.5)
+                                        ramp_idx = max(0, min(ramp_idx, ramp_len - 1))
+                                        
+                                        line_chars.append(ascii_ramp[ramp_idx])
+                                        
+                                        new_pixel = (ramp_idx / (ramp_len - 1)) * 255.0
+                                        error = old_pixel - new_pixel
+                                        
+                                        # Distribute quant error to adjacent matrices
+                                        if x + 1 < w: dither_buffer[y, x + 1] += error * 7 / 16
+                                        if y + 1 < h:
+                                            if x - 1 >= 0: dither_buffer[y + 1, x - 1] += error * 3 / 16
+                                            dither_buffer[y + 1, x] += error * 5 / 16
+                                            if x + 1 < w: dither_buffer[y + 1, x + 1] += error * 1 / 16
+                                    matrix_lines.append("".join(line_chars))
+                            else:
+                                # Standard direct mapping fallback
+                                for row in resized:
+                                    line_chars = "".join([ascii_ramp[int((pixel / 256.0) * ramp_len)] for pixel in row])
+                                    matrix_lines.append(line_chars)
+                                    
                             formatted_block = "```\n" + "\n".join(matrix_lines) + "\n```"
                             frames.append(formatted_block)
                             
@@ -613,7 +641,7 @@ with tabs[24]:
                         st.error("No valid video sequence timeline found inside this file.")
                         is_engine_ready = False
                     else:
-                        st.success(f"Parsed {len(frames)} high-fidelity frames! Stream ready.")
+                        st.success(f"Dithered and loaded {len(frames)} high-fidelity frames! Stream ready.")
                         
                 except Exception as e:
                     st.error(f"Engine matrix failure: {str(e)}")
