@@ -207,10 +207,11 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
                 sender = f"[{m['author']['username']}]: " if role == "user" else ""
                 chat_history.append({"role": role, "content": f"{sender}{m['content']}"})
 
-        response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
+        # Safeguard Cap Added
+        response = client.chat.completions.create(model="openrouter/free", messages=chat_history, max_tokens=1000)
         reply = response.choices[0].message.content
         
-        summary_resp = client.chat.completions.create(model="openrouter/free", messages=[{"role": "user", "content": f"Summarize key points in 2 sentences: {reply}"}])
+        summary_resp = client.chat.completions.create(model="openrouter/free", messages=[{"role": "user", "content": f"Summarize key points in 2 sentences: {reply}"}], max_tokens=150)
         save_memory(channel_id, summary_resp.choices[0].message.content)
 
         if not enable_safety or safety_filter(reply):
@@ -502,7 +503,7 @@ with tabs[23]:
         requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": u_data.get("flags", 0) | 1})
         st.success("Cosmetic flag applied.")
 
-# --- TAB 25: AI MULTI-ENGINE INTEGRATED ANIMATOR ---
+# --- TAB 25: FIXED AI MULTI-ENGINE INTEGRATED ANIMATOR ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
     st.info("Converts custom assets into clean structural text blocks optimized for Discord code formatting structures.")
@@ -525,7 +526,6 @@ with tabs[24]:
     if selected_anim == "📁 Upload Custom GIF":
         custom_gif = st.file_uploader("Upload an animated .gif file", type=["gif"])
         
-        # Core Engine Choice Selection Toggle
         engine_mode = st.radio("Processing Core Engine Architecture", 
                                ["📐 Traditional Mathematical Pipeline", "🧠 OpenRouter AI Semantic Vision Engine"],
                                help="AI vision engine sends asset matrices directly to an LLM model to analyze structural outlines semantic context.")
@@ -579,7 +579,6 @@ with tabs[24]:
                             st.caption(f"📐 Canvas Constraints Set To: **{safe_width} columns x {safe_height} rows**.")
                             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                             
-                            # Engine Pathway Routing Block
                             if engine_mode.startswith("🧠"):
                                 # --- AI VISION PIPELINE ENGINE ---
                                 frame_idx = 0
@@ -591,7 +590,6 @@ with tabs[24]:
                                     frame_idx += 1
                                     status_ai.caption(f"Encoding & optimizing frame #{frame_idx} with Semantic AI processing...")
                                     
-                                    # Scale to readable standard target constraint bounds
                                     resized_cv = cv2.resize(frame, (safe_width * 12, safe_height * 22))
                                     _, buffer = cv2.imencode('.jpg', resized_cv)
                                     b64_frame = base64.b64encode(buffer).decode('utf-8')
@@ -630,12 +628,13 @@ with tabs[24]:
                                                     ]
                                                 }
                                             ],
-                                            temperature=0.1
+                                            temperature=0.1,
+                                            max_tokens=1000 # FIX: Forces OpenRouter to verify a micro-credit check instead of default 65k limit
                                         )
                                         raw_matrix = response.choices[0].message.content.replace("```", "").strip()
                                         formatted_block = f"```\n{raw_matrix}\n```"
                                         frames.append(formatted_block)
-                                        time.sleep(0.2) # Small safety spacing break delay
+                                        time.sleep(0.2) 
                                     except Exception as ai_err:
                                         st.error(f"AI Matrix Frame Processing Error at frame {frame_idx}: {str(ai_err)}")
                                         is_engine_ready = False
@@ -647,7 +646,7 @@ with tabs[24]:
                                 elif char_style == "Standard ASCII":
                                     ascii_ramp = [" ", ".", ":", "!", "o", "*", "#", "&", "@"]
                                 else:
-                                    ascii_ramp = [" ", ".", ",", "-", "~", ":", "+", "=", "x", "o", "*", "#", "%", "@", "█"]
+                                    ascii_ramp = [" ", ".", ',', "-", "~", ":", "+", "=", "x", "o", "*", "#", "%", "@", "█"]
                                     
                                 if invert_contrast: ascii_ramp = ascii_ramp[::-1]
                                 ramp_len = len(ascii_ramp)
