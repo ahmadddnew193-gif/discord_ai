@@ -64,6 +64,18 @@ def load_memory(channel_id):
             except: pass
     return "No previous memory."
 
+# Sanitization helper to prevent InvalidSchema errors
+def clean_channel_id(ch_str):
+    ch_str = str(ch_str).strip()
+    if "channels/" in ch_str:
+        parts = [p for p in ch_str.split('/') if p.isdigit()]
+        if len(parts) >= 2:
+            return parts[1]  # Extracts the channel ID out of a full server channel link
+        elif len(parts) == 1:
+            return parts[0]
+    digits = "".join(c for c in ch_str if c.isdigit())
+    return digits if digits else ch_str
+
 # Initialize local session state
 if "access_granted" not in st.session_state:
     st.session_state.access_granted = False
@@ -207,7 +219,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
                 sender = f"[{m['author']['username']}]: " if role == "user" else ""
                 chat_history.append({"role": role, "content": f"{sender}{m['content']}"})
 
-        # Safeguard Cap Added
         response = client.chat.completions.create(model="openrouter/free", messages=chat_history, max_tokens=1000)
         reply = response.choices[0].message.content
         
@@ -293,8 +304,9 @@ with tabs[0]:
     if st.session_state.bot_running:
         status_box.info("Status: 🟢 ONLINE / IDLE")
         headers = get_headers(token)
-        discord_url = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
-        typing_url = f"https://discord.com/api/v9/channels/{channel_id_input}/typing"
+        clean_bot_ch = clean_channel_id(channel_id_input)
+        discord_url = f"https://discord.com/api/v9/channels/{clean_bot_ch}/messages"
+        typing_url = f"https://discord.com/api/v9/channels/{clean_bot_ch}/typing"
         
         try:
             r = requests.get(discord_url, headers=headers, timeout=3)
@@ -317,7 +329,8 @@ with tabs[1]:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
     if st.button("🔍 Scrape"):
-        res = requests.get(f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}", headers=get_headers(token))
+        clean_scrape_ch = clean_channel_id(channel_id_input)
+        res = requests.get(f"https://discord.com/api/v9/channels/{clean_scrape_ch}/messages?limit={limit}", headers=get_headers(token))
         if res.status_code == 200: st.dataframe(pd.DataFrame([{"Author": m['author']['username'], "Content": m['content']} for m in res.json()]))
 
 with tabs[2]:
@@ -346,7 +359,8 @@ with tabs[4]:
     if st.button("🚀 Send Emoji", use_container_width=True):
         if emoji_id:
             ext = "gif" if is_animated else "png"
-            requests.post(f"https://discord.com/api/v9/channels/{target_ch}/messages", headers=get_headers(token), json={"content": f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=48"})
+            clean_emoji_ch = clean_channel_id(target_ch)
+            requests.post(f"https://discord.com/api/v9/channels/{clean_emoji_ch}/messages", headers=get_headers(token), json={"content": f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=48"})
 
 with tabs[5]:
     st.header("❄️ Snowflake Age Decoder")
@@ -379,7 +393,8 @@ with tabs[8]:
     sound_guild_id = st.text_input("Source Server ID")
     if st.button("🔊 Fire Sound"):
         if token and sound_ch_id and sound_id:
-            requests.post(f"https://discord.com/api/v9/channels/{sound_ch_id}/voice-channel-effects", headers=get_headers(token), json={"sound_id": sound_id, "source_guild_id": sound_guild_id or None})
+            clean_sound_ch = clean_channel_id(sound_ch_id)
+            requests.post(f"https://discord.com/api/v9/channels/{clean_sound_ch}/voice-channel-effects", headers=get_headers(token), json={"sound_id": sound_id, "source_guild_id": sound_guild_id or None})
 
 with tabs[9]:
     st.header("✨ HypeSquad Spoofer")
@@ -405,10 +420,11 @@ with tabs[12]:
     if st.button("🔥 Purge My Messages"):
         if my_id:
             h = get_headers(token)
-            msgs = requests.get(f"https://discord.com/api/v9/channels/{ghost_ch}/messages?limit={ghost_limit}", headers=h).json()
+            clean_ghost_ch = clean_channel_id(ghost_ch)
+            msgs = requests.get(f"https://discord.com/api/v9/channels/{clean_ghost_ch}/messages?limit={ghost_limit}", headers=h).json()
             for m in msgs:
                 if m['author']['id'] == my_id:
-                    requests.delete(f"https://discord.com/api/v9/channels/{ghost_ch}/messages/{m['id']}", headers=h)
+                    requests.delete(f"https://discord.com/api/v9/channels/{clean_ghost_ch}/messages/{m['id']}", headers=h)
                     time.sleep(1.2)
 
 with tabs[13]:
@@ -418,14 +434,16 @@ with tabs[13]:
     color_codes = {"Red": "31", "Green": "32", "Yellow": "33", "Blue": "34"}
     if st.button("🖌️ Send Colored Text"):
         ansi_payload = f"```ansi\n\u001b[{color_codes[color_choice]}m{color_text}```"
-        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload})
+        clean_paint_ch = clean_channel_id(channel_id_input)
+        requests.post(f"https://discord.com/api/v9/channels/{clean_paint_ch}/messages", headers=get_headers(token), json={"content": ansi_payload})
 
 with tabs[14]:
     st.header("⏳ Infinite Typing Indicator")
     if st.button("🚀 Start Typing"): st.session_state.typing_active = True
     if st.button("🛑 Stop Typing"): st.session_state.typing_active = False
     if st.session_state.typing_active:
-        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/typing", headers=get_headers(token))
+        clean_type_ch = clean_channel_id(channel_id_input)
+        requests.post(f"https://discord.com/api/v9/channels/{clean_type_ch}/typing", headers=get_headers(token))
         time.sleep(6)
         st.rerun()
 
@@ -449,7 +467,8 @@ with tabs[17]:
     st.header("🖼️ Sticker Spoofer")
     stick_id = st.text_input("Sticker ID")
     if st.button("Send Sticker"):
-        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": f"https://cdn.discordapp.com/stickers/{stick_id}.png?size=160"})
+        clean_stick_ch = clean_channel_id(channel_id_input)
+        requests.post(f"https://discord.com/api/v9/channels/{clean_stick_ch}/messages", headers=get_headers(token), json={"content": f"https://cdn.discordapp.com/stickers/{stick_id}.png?size=160"})
 
 with tabs[18]:
     st.header("📦 Large File Bridge")
@@ -458,7 +477,8 @@ with tabs[18]:
         if uploaded_file and token:
             server = requests.get("https://api.gofile.io/getServer").json()['data']['server']
             up_res = requests.post(f"https://{server}.gofile.io/uploadFile", files={'file': (uploaded_file.name, uploaded_file.getvalue())}).json()
-            requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": f"🔗 {up_res['data']['downloadPage']}"})
+            clean_bridge_ch = clean_channel_id(channel_id_input)
+            requests.post(f"https://discord.com/api/v9/channels/{clean_bridge_ch}/messages", headers=get_headers(token), json={"content": f"🔗 {up_res['data']['downloadPage']}"})
 
 with tabs[19]:
     st.header("👻 Invisible Identity")
@@ -482,7 +502,8 @@ with tabs[21]:
     st.header("👻 Ghost Pinger")
     ghost_target_id = st.text_input("User ID")
     if st.button("💀 Fire Ghost Ping"):
-        u = f"https://discord.com/api/v9/channels/{channel_id_input}/messages"
+        clean_ping_ch = clean_channel_id(channel_id_input)
+        u = f"https://discord.com/api/v9/channels/{clean_ping_ch}/messages"
         res = requests.post(u, headers=get_headers(token), json={"content": f"<@{ghost_target_id}>"})
         if res.status_code == 200: requests.delete(f"{u}/{res.json()['id']}", headers=get_headers(token))
 
@@ -580,7 +601,6 @@ with tabs[24]:
                             cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                             
                             if engine_mode.startswith("🧠"):
-                                # --- AI VISION PIPELINE ENGINE ---
                                 frame_idx = 0
                                 status_ai = st.empty()
                                 
@@ -629,7 +649,7 @@ with tabs[24]:
                                                 }
                                             ],
                                             temperature=0.1,
-                                            max_tokens=1000 # FIX: Forces OpenRouter to verify a micro-credit check instead of default 65k limit
+                                            max_tokens=1000
                                         )
                                         raw_matrix = response.choices[0].message.content.replace("```", "").strip()
                                         formatted_block = f"```\n{raw_matrix}\n```"
@@ -640,7 +660,6 @@ with tabs[24]:
                                         is_engine_ready = False
                                         break
                             else:
-                                # --- MATHEMATICAL MANIPULATION ENGINE ---
                                 if char_style == "Blocks (Solid Shape)":
                                     ascii_ramp = [" ", "░", "▒", "▓", "█"]
                                 elif char_style == "Standard ASCII":
@@ -697,9 +716,11 @@ with tabs[24]:
     frame_delay = st.slider("Frame Delay (Seconds)", 0.5, 3.0, 1.1)
 
     if st.button("🚀 Fire 2D Animation", use_container_width=True, disabled=not is_engine_ready):
-        if token and anim_ch and frames:
+        # Applied sanitization layer here to clean whitespace and link wrappers
+        clean_anim_ch = clean_channel_id(anim_ch)
+        if token and clean_anim_ch and frames:
             h = get_headers(token)
-            edit_url = f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){anim_ch}/messages"
+            edit_url = f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){clean_anim_ch}/messages"
             
             first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]})
             if first_frame_res.status_code == 200:
