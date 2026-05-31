@@ -10,9 +10,10 @@ import pandas as pd
 import base64
 import json
 import re
-import cv2        # Advanced image processing
-import tempfile   # Cross-platform secure disk stream caching
-import math       # Layout boundary math
+import cv2        
+import tempfile   
+import math       
+import numpy as np
 from duckduckgo_search import DDGS
 
 st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
@@ -310,7 +311,7 @@ with tabs[0]:
             time.sleep(poll_speed)
             st.rerun()
 
-# --- STANDARD BACKEND PIPELINE TABS ---
+# --- STANDALONE TOOL TABS ---
 with tabs[1]:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
@@ -501,10 +502,10 @@ with tabs[23]:
         requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": u_data.get("flags", 0) | 1})
         st.success("Cosmetic flag applied.")
 
-# --- TAB 25: 2D TEXT ANIMATOR (WITH DITHERING & ERROR DIFFUSION PIPELINE) ---
+# --- TAB 25: OVERHAULED 2D TEXT ANIMATOR ENGINE ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
-    st.info("Sends a text matrix and rapidly edits it frame-by-frame to create a live 2D flipbook animation in chat.")
+    st.info("Converts custom GIFs into clean structural text blocks optimized for Discord code formatting structures.")
     
     anim_ch = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     
@@ -524,25 +525,26 @@ with tabs[24]:
     if selected_anim == "📁 Upload Custom GIF":
         custom_gif = st.file_uploader("Upload an animated .gif file", type=["gif"])
         
-        col_w, col_inv, col_dith = st.columns(3)
+        col_w, col_inv, col_sharp = st.columns(3)
         with col_w:
-            max_cols = st.slider("Target Max Width (Columns)", min_value=15, max_value=60, value=45)
+            max_cols = st.slider("Target Matrix Width", min_value=15, max_value=60, value=42,
+                                help="Values around 40-44 prevent layout line-break rendering bugs inside standard Discord clients.")
         with col_inv:
-            invert_contrast = st.toggle("Invert Text Contrast", value=False)
-        with col_dith:
-            use_dithering = st.toggle("✨ Floyd-Steinberg Dithering", value=True, 
-                                      help="Spreads out rounding errors across pixels to make textures and hidden micro-details pop out clearly.")
+            invert_contrast = st.toggle("Force Inverse Character Weights", value=False)
+        with col_sharp:
+            edge_sharpness = st.slider("Micro-Grid Edge Sharpening", 0.0, 3.0, 1.5, step=0.1,
+                                       help="Applies high-pass matrix sharpening directly to the grid pixels to keep small borders crisp.")
             
         col_br, col_co, col_style = st.columns(3)
         with col_br:
-            brightness_val = st.slider("Brightness Correction", -100, 100, 0)
+            brightness_val = st.slider("Exposure Tuning (Brightness)", -100, 100, 0)
         with col_co:
-            contrast_val = st.slider("Contrast Multiplier", 0.5, 3.0, 1.2)
+            contrast_val = st.slider("Contrast Correction (Gamma Scale)", 0.5, 4.0, 1.8, step=0.1)
         with col_style:
-            char_style = st.selectbox("Character Set", ["Blocks (Solid Shape)", "Standard ASCII", "Extended Fidelity"])
+            char_style = st.selectbox("Font Density Character Set", ["Blocks (Solid Shape)", "Standard ASCII", "Extended Fidelity"])
 
         if custom_gif is not None:
-            with st.spinner("Executing dynamic frame dither & contrast equalization matrix..."):
+            with st.spinner("Processing matrix layout streams..."):
                 try:
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".gif") as tmp:
                         tmp.write(custom_gif.getvalue())
@@ -552,12 +554,13 @@ with tabs[24]:
                     ret, first_frame = cap.read()
                     
                     if not ret:
-                        st.error("Could not parse image frames from the uploaded source asset.")
+                        st.error("Could not parse image frames from the uploaded asset.")
                         is_engine_ready = False
                     else:
                         orig_h, orig_w = first_frame.shape[:2]
-                        aspect_ratio_modifier = (orig_h / orig_w) * 0.55
+                        aspect_ratio_modifier = (orig_h / orig_w) * 0.52
                         
+                        # Perfect canvas constraint calculation
                         R = aspect_ratio_modifier
                         if R > 0:
                             calculated_max_w = (-R + math.sqrt((R**2) - (4 * R * -1942))) / (2 * R)
@@ -570,15 +573,18 @@ with tabs[24]:
                             safe_width -= 1
                             safe_height = max(1, int(safe_width * aspect_ratio_modifier))
                         
-                        st.caption(f"📐 Canvas Grid Resolution Auto-Locked to: **{safe_width}x{safe_height}** characters.")
+                        st.caption(f"📐 Resolution Configured to: **{safe_width} columns x {safe_height} rows**.")
                         
-                        # Set Up Character Mapping System
+                        # Re-engineered character density ramps fine-tuned specifically for Discord Dark Mode
                         if char_style == "Blocks (Solid Shape)":
-                            ascii_ramp = " ░▒▓█" if not invert_contrast else "█▓▒░ "
-                        elif char_style == "Extended Fidelity":
-                            ascii_ramp = " .'-^,:;=!*#$@█" if not invert_contrast else "█@$#*!=;:,-^'-. "
-                        else:
-                            ascii_ramp = " .:-=+*#%@" if not invert_contrast else "@%#*+=-:. "
+                            ascii_ramp = [" ", "░", "▒", "▓", "█"]
+                        elif char_style == "Standard ASCII":
+                            ascii_ramp = [" ", ".", ":", "!", "o", "*", "#", "&", "@"]
+                        else: # Extended Fidelity
+                            ascii_ramp = [" ", ".", ",", "-", "~", ":", "+", "=", "x", "o", "*", "#", "%", "@", "█"]
+                            
+                        if invert_contrast:
+                            ascii_ramp = ascii_ramp[::-1]
                             
                         ramp_len = len(ascii_ramp)
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
@@ -589,47 +595,35 @@ with tabs[24]:
                                 
                             gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
                             
-                            # Apply Brightness and Contrast Enhancements
-                            gray = cv2.convertScaleAbs(gray, alpha=contrast_val, beta=brightness_val)
-                            
-                            # Equalize local region histograms
-                            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(5,5))
-                            gray = clahe.apply(gray)
-                            
+                            # CRITICAL ARCHITECTURAL FIX: Downsample FIRST, then adjust details on the tiny grid
                             resized = cv2.resize(gray, (safe_width, safe_height), interpolation=cv2.INTER_AREA)
-                            matrix_lines = []
                             
-                            if use_dithering:
-                                # FLOYD-STEINBERG ERROR DIFFUSION PIPELINE
-                                dither_buffer = resized.astype(float)
-                                h, w = dither_buffer.shape
-                                
-                                for y in range(h):
-                                    line_chars = []
-                                    for x in range(w):
-                                        old_pixel = max(0.0, min(255.0, dither_buffer[y, x]))
-                                        
-                                        # Match pixel value smoothly to font scale range
-                                        ramp_idx = int((old_pixel / 255.0) * (ramp_len - 1) + 0.5)
-                                        ramp_idx = max(0, min(ramp_idx, ramp_len - 1))
-                                        
-                                        line_chars.append(ascii_ramp[ramp_idx])
-                                        
-                                        new_pixel = (ramp_idx / (ramp_len - 1)) * 255.0
-                                        error = old_pixel - new_pixel
-                                        
-                                        # Distribute quant error to adjacent matrices
-                                        if x + 1 < w: dither_buffer[y, x + 1] += error * 7 / 16
-                                        if y + 1 < h:
-                                            if x - 1 >= 0: dither_buffer[y + 1, x - 1] += error * 3 / 16
-                                            dither_buffer[y + 1, x] += error * 5 / 16
-                                            if x + 1 < w: dither_buffer[y + 1, x + 1] += error * 1 / 16
-                                    matrix_lines.append("".join(line_chars))
-                            else:
-                                # Standard direct mapping fallback
-                                for row in resized:
-                                    line_chars = "".join([ascii_ramp[int((pixel / 256.0) * ramp_len)] for pixel in row])
-                                    matrix_lines.append(line_chars)
+                            # Apply Brightness and Contrast multi-passes directly onto the micro-grid
+                            enhanced_grid = cv2.convertScaleAbs(resized, alpha=contrast_val, beta=brightness_val)
+                            
+                            # Apply localized tile contrast normalization to reveal textures
+                            clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(4,4))
+                            enhanced_grid = clahe.apply(enhanced_grid)
+                            
+                            # Dynamic Edge Sharpening filter to keep boundaries clear at low resolution
+                            if edge_sharpness > 0:
+                                kernel = np.array([
+                                    [0, -1, 0],
+                                    [-1, 4 + edge_sharpness, -1],
+                                    [0, -1, 0]
+                                ], dtype=np.float32) / (2 + edge_sharpness)
+                                # Blend sharpened edges back into normalized array context
+                                enhanced_grid = cv2.filter2D(enhanced_grid, -1, kernel)
+                            
+                            # Convert pixel values to clean text characters
+                            matrix_lines = []
+                            for row in enhanced_grid:
+                                line_chars = []
+                                for pixel in row:
+                                    idx = int((pixel / 256.0) * ramp_len)
+                                    idx = max(0, min(idx, ramp_len - 1))
+                                    line_chars.append(ascii_ramp[idx])
+                                matrix_lines.append("".join(line_chars))
                                     
                             formatted_block = "```\n" + "\n".join(matrix_lines) + "\n```"
                             frames.append(formatted_block)
@@ -638,19 +632,19 @@ with tabs[24]:
                     os.unlink(tmp_path)
                     
                     if len(frames) == 0:
-                        st.error("No valid video sequence timeline found inside this file.")
+                        st.error("No valid frame timeline found inside this asset file.")
                         is_engine_ready = False
                     else:
-                        st.success(f"Dithered and loaded {len(frames)} high-fidelity frames! Stream ready.")
+                        st.success(f"Successfully processed {len(frames)} frames!")
                         
                 except Exception as e:
-                    st.error(f"Engine matrix failure: {str(e)}")
+                    st.error(f"Engine failure: {str(e)}")
                     is_engine_ready = False
         else: is_engine_ready = False
     else: frames = animation_presets[selected_anim]
 
     loop_count = st.slider("Animation Loops", 1, 10, 3)
-    frame_delay = st.slider("Frame Delay (Seconds)", 1.0, 3.0, 1.3)
+    frame_delay = st.slider("Frame Delay (Seconds)", 0.5, 3.0, 1.1)
 
     if st.button("🚀 Fire 2D Animation", use_container_width=True, disabled=not is_engine_ready):
         if token and anim_ch and frames:
@@ -665,12 +659,12 @@ with tabs[24]:
                 
                 for current_loop in range(loop_count):
                     for frame_idx, frame_content in enumerate(frames):
-                        status_placeholder.write(f"🎬 Playing: Loop {current_loop + 1}/{loop_count} | Frame {frame_idx + 1}/{len(frames)}")
+                        status_placeholder.write(f"🎬 Stream Active: Loop {current_loop + 1}/{loop_count} | Frame {frame_idx + 1}/{len(frames)}")
                         res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content})
                         
                         if res.status_code == 429:
                             retry_after = res.json().get("retry_after", 2.0)
                             time.sleep(retry_after)
                         time.sleep(frame_delay)
-                status_placeholder.success("✨ Animation stream processing sequence finished completely!")
+                status_placeholder.success("✨ Animation processing stream completed successfully!")
             else: st.error(f"Failed to initiate link pipeline: {first_frame_res.text}")
