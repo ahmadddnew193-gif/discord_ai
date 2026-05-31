@@ -10,8 +10,9 @@ import pandas as pd
 import base64
 import json
 import re
-import cv2        # Added for processing GIF frames
-import tempfile   # Added for handling uploaded file bytes safely
+import cv2        # Added for advanced image/GIF frame array parsing
+import tempfile   # Added for secure, multi-platform disk stream caching
+import math       # Added for quadratic aspect ratio bound checks
 from duckduckgo_search import DDGS
 
 st.set_page_config(page_title="Discord AI", page_icon="🛡️", layout="wide")
@@ -72,15 +73,11 @@ if not shared_code:
     st.session_state.access_granted = False
 
 # --- UPDATED INACTIVITY LOGIC ---
-# This block ensures the code only expires if it ISN'T being used.
 if shared_code and shared_time:
-    # If the user is active, we push the expiration forward
     if st.session_state.access_granted:
-        # We only update the file every 30 seconds to save disk performance
         if time.time() - shared_time > 30:
             set_global_code(shared_code)
     
-    # Check for hard timeout (10 minutes of inactivity)
     if time.time() - shared_time > 600:
         if os.path.exists(CODE_FILE):
             os.remove(CODE_FILE)
@@ -237,7 +234,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             return True
     except Exception as e:
         st.session_state.debug_log = f"Error: {str(e)}"
-    return False
+        return False
 
 # --- Sidebar Bot Settings ---
 with st.sidebar:
@@ -421,7 +418,6 @@ with tabs[15]:
                         st.markdown(f"### [{res['title']}]({res['href']})")
                         st.write(res['body'])
                         st.divider()
-        
                 elif search_type == "News":
                     results = list(ddgs.news(search_query, max_results=10))
                     for res in results:
@@ -633,8 +629,8 @@ with tabs[14]:
 with tabs[23]:
     st.header("💎 Nitro Badge Spoofer")
     st.warning("⚠️ Warning: Manipulating account flags is purely cosmetic and local to the API's response. Discord may reset these if they detect the mismatch.")
-    nitro_bit = 1 
     
+    nitro_bit = 1 
     if st.button("✨ Apply Nitro Badge", use_container_width=True):
         if token:
             h = get_headers(token)
@@ -642,13 +638,13 @@ with tabs[23]:
             current_flags = user_data.get("flags", 0)
             new_flags = current_flags | nitro_bit
             res = requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": new_flags})
+            
             if res.status_code == 200:
                 st.success(f"Flags patched to: {new_flags}. Refresh your client/browser.")
             else:
                 st.error(f"Failed to patch: {res.status_code}")
 
-# --- TAB 25: 2D TEXT ANIMATOR ---
-# --- TAB 25: 2D TEXT MATRIX ANIMATOR ---
+# --- UPDATED TAB: 2D TEXT ANIMATOR (BUILT FOR ALL CUSTOM WIDTHS & LIMITS) ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
     st.info("Sends a text matrix and rapidly edits it frame-by-frame to create a live 2D flipbook animation in chat.")
@@ -661,11 +657,21 @@ with tabs[24]:
             "```\n  \\ \n  \\\\(@)~ \n    ###   \n  _// \\_ \n```",
             "```\n        \n    (@)/ \n   /###  \n  _/  \\  \n```",
             "```\n        \n   _@_   \n  (###)  \n  _/ \\_  \n```",
-            "```\n        \n   \\(@)  \n    ###\\ \n    /  \\_\n```"
+            "```\n        \n   \\(@)  \n    ###\\ \n    /  \\_\n```",
+            "```\n        \n  ~(@)~  \n   ###   \n  _// \\_ \n```",
+            "```\n        \n   _(@)_ \n  / ### \\\n    /   \\\n```"
+        ],
+        "⚽ Bouncing Ball": [
+            "```\n[○      ]\n```", "```\n[  ○    ]\n```", "```\n[    ○  ]\n```",
+            "```\n[      ○]\n```", "```\n[    ○  ]\n```", "```\n[  ○    ]\n```"
         ],
         "🤖 Robot Face Blink": [
             "```\n  [ O _ O ] \n   /|___|\\  \n```", "```\n  [ - _ - ] \n   /|___|\\  \n```",
             "```\n  [ O _ O ] \n   /|___|\\  \n```", "```\n  [ > _ < ] \n   /|___|\\  \n```"
+        ],
+        "📡 Loading Radar": [
+            "```\n   ⏱️ [|] Loading\n```", "```\n   ⏱️ [/] Loading.\n```",
+            "```\n   ⏱️ [-] Loading..\n```", "```\n   ⏱️ [\\] Loading...\n```"
         ]
     }
     
@@ -681,38 +687,34 @@ with tabs[24]:
         col_w, col_inv = st.columns(2)
         with col_w:
             max_cols = st.slider("Target Max Width (Columns)", min_value=15, max_value=60, value=42, 
-                                help="40-45 columns is ideal for avoiding layout wrapping on Discord desktop/mobile.")
+                                help="40-45 columns is ideal for avoiding broken layout wrapping on desktop/mobile views.")
         with col_inv:
             invert_contrast = st.toggle("Invert Text Contrast", value=False, 
-                                        help="Flip this if the dark/light regions look inverted on Discord's dark theme.")
+                                        help="Flip this if dark and light sections look reversed on Discord's theme layout.")
             
         if custom_gif is not None:
-            with st.spinner("Analyzing aspect ratio and compiling frames..."):
+            with st.spinner("Analyzing aspect ratio and compiling frames safely..."):
                 try:
-                    # Save stream to temporary file for OpenCV processing
+                    # Cache the memory stream to file temporarily for safe OpenCV frame calculations
                     with tempfile.NamedTemporaryFile(delete=False, suffix=".gif") as tmp:
                         tmp.write(custom_gif.getvalue())
                         tmp_path = tmp.name
                     
                     cap = cv2.VideoCapture(tmp_path)
-                    
-                    # 1. Read first frame to calculate dimensions
                     ret, first_frame = cap.read()
+                    
                     if not ret:
-                        st.error("Could not parse frames from the uploaded GIF.")
+                        st.error("Could not parse valid image frames from the uploaded GIF.")
                         is_engine_ready = False
                     else:
                         orig_h, orig_w = first_frame.shape[:2]
                         
-                        # Monospace character font correction factor (Width is ~0.55 of height in Discord)
+                        # Apply standard font layout multiplier correction factor (~0.55 aspect for Discord monospace)
                         aspect_ratio_modifier = (orig_h / orig_w) * 0.55
                         
-                        # 2. Dynamic Math Engine: Calculate max safe width to stay under 1950 characters
-                        # Equation: (W + 1) * (W * aspect_modifier) + 8 <= 1950
-                        # R * W^2 + R * W - 1942 <= 0
+                        # Dynamic Math: Solve maximum allowable width based on the quadratic 2000-character payload barrier
                         R = aspect_ratio_modifier
                         if R > 0:
-                            import math
                             calculated_max_w = (-R + math.sqrt((R**2) - (4 * R * -1942))) / (2 * R)
                             safe_width = min(int(calculated_max_w), max_cols)
                         else:
@@ -720,21 +722,20 @@ with tabs[24]:
                             
                         safe_height = max(1, int(safe_width * aspect_ratio_modifier))
                         
-                        # 3. Final safety iteration loop to absolute guarantee Discord compliance
+                        # Safety Fallback Iteration: Downscale bounds step-by-step until length is safely inside limits
                         while (safe_width + 1) * safe_height + 8 > 1950:
                             safe_width -= 1
                             safe_height = max(1, int(safe_width * aspect_ratio_modifier))
                         
-                        st.caption(f"📐 Auto-scaled frame canvas grid to: **{safe_width}x{safe_height}** characters.")
+                        st.caption(f"📐 System auto-configured frame canvas resolution to: **{safe_width}x{safe_height}** blocks.")
                         
-                        # Define ASCII palette ramp
+                        # Handle text density ramp arrays
                         ascii_ramp = " .:-=+*#%@" if not invert_contrast else "@%#*+=-:. "
                         ramp_len = len(ascii_ramp)
                         
-                        # Reset capture pointer to beginning of the file
+                        # Rewind pointer stream back to index zero
                         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                         
-                        # 4. Render out the frame sequences
                         while True:
                             ret, frame = cap.read()
                             if not ret:
@@ -748,7 +749,6 @@ with tabs[24]:
                                 line_chars = "".join([ascii_ramp[int(pixel / 256 * ramp_len)] for pixel in row])
                                 matrix_lines.append(line_chars)
                                 
-                            # Wrap frame in a markdown code-block wrapper
                             formatted_block = "```\n" + "\n".join(matrix_lines) + "\n```"
                             frames.append(formatted_block)
                             
@@ -756,13 +756,13 @@ with tabs[24]:
                     os.unlink(tmp_path)
                     
                     if len(frames) == 0:
-                        st.error("No extractable visual data found inside this asset.")
+                        st.error("No extractable frame data discovered inside the asset bundle.")
                         is_engine_ready = False
                     else:
-                        st.success(f"Parsed {len(frames)} frames successfully! Ready to render.")
+                        st.success(f"Successfully processed {len(frames)} safe frames! Ready to play.")
                         
                 except Exception as e:
-                    st.error(f"Engine conversion error: {str(e)}")
+                    st.error(f"Engine conversion crash: {str(e)}")
                     is_engine_ready = False
         else:
             is_engine_ready = False
@@ -771,22 +771,22 @@ with tabs[24]:
 
     loop_count = st.slider("Animation Loops", 1, 10, 3)
     frame_delay = st.slider("Frame Delay (Seconds)", 1.0, 3.0, 1.3, 
-                            help="Speeds faster than 1.2s will trigger Discord's aggressive HTTP 429 rate limits.")
+                            help="Speeds faster than 1.2s risk hitting tight HTTP 429 rate limits.")
 
     if st.button("🚀 Fire 2D Animation", use_container_width=True, disabled=not is_engine_ready):
         if token and anim_ch and frames:
             h = get_headers(token)
-            base_url = f"https://discord.com/api/v9/channels/{anim_ch}/messages"
+            edit_url = f"https://discord.com/api/v9/channels/{anim_ch}/messages"
             
-            # Step 1: Push base placeholder post
-            first_frame_res = requests.post(base_url, headers=h, json={"content": frames[0]})
+            # Step 1: Deploy base post container
+            first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]})
             
             if first_frame_res.status_code == 200:
                 msg_id = first_frame_res.json()["id"]
-                specific_msg_url = f"{base_url}/{msg_id}"
+                specific_msg_url = f"{edit_url}/{msg_id}"
                 status_placeholder = st.empty()
                 
-                # Step 2: Loop sequential frame modifications via PATCH
+                # Step 2: Loop sequential mutations via HTTP PATCH updates
                 for current_loop in range(loop_count):
                     for frame_idx, frame_content in enumerate(frames):
                         status_placeholder.write(f"🎬 Playing: Loop {current_loop + 1}/{loop_count} | Frame {frame_idx + 1}/{len(frames)}")
@@ -802,4 +802,4 @@ with tabs[24]:
                 
                 status_placeholder.success("✨ Animation sequence finished running successfully!")
             else:
-                st.error(f"Failed to initiate animation stream: {first_frame_res.text}")
+                st.error(f"Failed to initiate animation link pipeline: {first_frame_res.text}")
