@@ -502,10 +502,10 @@ with tabs[23]:
         requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": u_data.get("flags", 0) | 1})
         st.success("Cosmetic flag applied.")
 
-# --- TAB 25: OVERHAULED 2D TEXT ANIMATOR ENGINE ---
+# --- TAB 25: AI MULTI-ENGINE INTEGRATED ANIMATOR ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
-    st.info("Converts custom GIFs into clean structural text blocks optimized for Discord code formatting structures.")
+    st.info("Converts custom assets into clean structural text blocks optimized for Discord code formatting structures.")
     
     anim_ch = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     
@@ -525,121 +525,172 @@ with tabs[24]:
     if selected_anim == "📁 Upload Custom GIF":
         custom_gif = st.file_uploader("Upload an animated .gif file", type=["gif"])
         
-        col_w, col_inv, col_sharp = st.columns(3)
+        # Core Engine Choice Selection Toggle
+        engine_mode = st.radio("Processing Core Engine Architecture", 
+                               ["📐 Traditional Mathematical Pipeline", "🧠 OpenRouter AI Semantic Vision Engine"],
+                               help="AI vision engine sends asset matrices directly to an LLM model to analyze structural outlines semantic context.")
+        
+        col_w, col_inv, col_extra = st.columns(3)
         with col_w:
-            max_cols = st.slider("Target Matrix Width", min_value=15, max_value=60, value=42,
-                                help="Values around 40-44 prevent layout line-break rendering bugs inside standard Discord clients.")
+            max_cols = st.slider("Target Matrix Width (Columns)", min_value=15, max_value=60, value=42)
         with col_inv:
-            invert_contrast = st.toggle("Force Inverse Character Weights", value=False)
-        with col_sharp:
-            edge_sharpness = st.slider("Micro-Grid Edge Sharpening", 0.0, 3.0, 1.5, step=0.1,
-                                       help="Applies high-pass matrix sharpening directly to the grid pixels to keep small borders crisp.")
+            invert_contrast = st.toggle("Force Inverse Value Weights", value=False)
+        with col_extra:
+            if engine_mode.startswith("📐"):
+                edge_sharpness = st.slider("Micro-Grid Edge Sharpening", 0.0, 3.0, 1.5, step=0.1)
+            else:
+                ai_model_name = st.text_input("Vision Model Spec", value="google/gemini-2.5-flash")
             
         col_br, col_co, col_style = st.columns(3)
         with col_br:
-            brightness_val = st.slider("Exposure Tuning (Brightness)", -100, 100, 0)
+            brightness_val = st.slider("Exposure Tuning (Brightness)", -100, 100, 0, disabled=engine_mode.startswith("🧠"))
         with col_co:
-            contrast_val = st.slider("Contrast Correction (Gamma Scale)", 0.5, 4.0, 1.8, step=0.1)
+            contrast_val = st.slider("Contrast Correction (Gamma)", 0.5, 4.0, 1.8, step=0.1, disabled=engine_mode.startswith("🧠"))
         with col_style:
             char_style = st.selectbox("Font Density Character Set", ["Blocks (Solid Shape)", "Standard ASCII", "Extended Fidelity"])
 
         if custom_gif is not None:
-            with st.spinner("Processing matrix layout streams..."):
-                try:
-                    with tempfile.NamedTemporaryFile(delete=False, suffix=".gif") as tmp:
-                        tmp.write(custom_gif.getvalue())
-                        tmp_path = tmp.name
-                    
-                    cap = cv2.VideoCapture(tmp_path)
-                    ret, first_frame = cap.read()
-                    
-                    if not ret:
-                        st.error("Could not parse image frames from the uploaded asset.")
-                        is_engine_ready = False
-                    else:
-                        orig_h, orig_w = first_frame.shape[:2]
-                        aspect_ratio_modifier = (orig_h / orig_w) * 0.52
+            if engine_mode.startswith("🧠") and not or_key:
+                st.error("OpenRouter API Key is required inside the sidebar authentication module to trigger the Semantic Vision Engine.")
+                is_engine_ready = False
+            else:
+                with st.spinner("Processing asset layout frames via chosen pipeline..."):
+                    try:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=".gif") as tmp:
+                            tmp.write(custom_gif.getvalue())
+                            tmp_path = tmp.name
                         
-                        # Perfect canvas constraint calculation
-                        R = aspect_ratio_modifier
-                        if R > 0:
-                            calculated_max_w = (-R + math.sqrt((R**2) - (4 * R * -1942))) / (2 * R)
-                            safe_width = min(int(calculated_max_w), max_cols)
+                        cap = cv2.VideoCapture(tmp_path)
+                        ret, first_frame = cap.read()
+                        
+                        if not ret:
+                            st.error("Could not parse image frames from asset source.")
+                            is_engine_ready = False
                         else:
+                            orig_h, orig_w = first_frame.shape[:2]
+                            aspect_ratio_modifier = (orig_h / orig_w) * 0.52
+                            
                             safe_width = max_cols
-                            
-                        safe_height = max(1, int(safe_width * aspect_ratio_modifier))
-                        while (safe_width + 1) * safe_height + 8 > 1950:
-                            safe_width -= 1
                             safe_height = max(1, int(safe_width * aspect_ratio_modifier))
-                        
-                        st.caption(f"📐 Resolution Configured to: **{safe_width} columns x {safe_height} rows**.")
-                        
-                        # Re-engineered character density ramps fine-tuned specifically for Discord Dark Mode
-                        if char_style == "Blocks (Solid Shape)":
-                            ascii_ramp = [" ", "░", "▒", "▓", "█"]
-                        elif char_style == "Standard ASCII":
-                            ascii_ramp = [" ", ".", ":", "!", "o", "*", "#", "&", "@"]
-                        else: # Extended Fidelity
-                            ascii_ramp = [" ", ".", ",", "-", "~", ":", "+", "=", "x", "o", "*", "#", "%", "@", "█"]
+                            while (safe_width + 1) * safe_height + 8 > 1950:
+                                safe_width -= 1
+                                safe_height = max(1, int(safe_width * aspect_ratio_modifier))
                             
-                        if invert_contrast:
-                            ascii_ramp = ascii_ramp[::-1]
+                            st.caption(f"📐 Canvas Constraints Set To: **{safe_width} columns x {safe_height} rows**.")
+                            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
                             
-                        ramp_len = len(ascii_ramp)
-                        cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
-                        
-                        while True:
-                            ret, frame = cap.read()
-                            if not ret: break
+                            # Engine Pathway Routing Block
+                            if engine_mode.startswith("🧠"):
+                                # --- AI VISION PIPELINE ENGINE ---
+                                frame_idx = 0
+                                status_ai = st.empty()
                                 
-                            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-                            
-                            # CRITICAL ARCHITECTURAL FIX: Downsample FIRST, then adjust details on the tiny grid
-                            resized = cv2.resize(gray, (safe_width, safe_height), interpolation=cv2.INTER_AREA)
-                            
-                            # Apply Brightness and Contrast multi-passes directly onto the micro-grid
-                            enhanced_grid = cv2.convertScaleAbs(resized, alpha=contrast_val, beta=brightness_val)
-                            
-                            # Apply localized tile contrast normalization to reveal textures
-                            clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(4,4))
-                            enhanced_grid = clahe.apply(enhanced_grid)
-                            
-                            # Dynamic Edge Sharpening filter to keep boundaries clear at low resolution
-                            if edge_sharpness > 0:
-                                kernel = np.array([
-                                    [0, -1, 0],
-                                    [-1, 4 + edge_sharpness, -1],
-                                    [0, -1, 0]
-                                ], dtype=np.float32) / (2 + edge_sharpness)
-                                # Blend sharpened edges back into normalized array context
-                                enhanced_grid = cv2.filter2D(enhanced_grid, -1, kernel)
-                            
-                            # Convert pixel values to clean text characters
-                            matrix_lines = []
-                            for row in enhanced_grid:
-                                line_chars = []
-                                for pixel in row:
-                                    idx = int((pixel / 256.0) * ramp_len)
-                                    idx = max(0, min(idx, ramp_len - 1))
-                                    line_chars.append(ascii_ramp[idx])
-                                matrix_lines.append("".join(line_chars))
+                                while True:
+                                    ret, frame = cap.read()
+                                    if not ret: break
+                                    frame_idx += 1
+                                    status_ai.caption(f"Encoding & optimizing frame #{frame_idx} with Semantic AI processing...")
                                     
-                            formatted_block = "```\n" + "\n".join(matrix_lines) + "\n```"
-                            frames.append(formatted_block)
-                            
-                    cap.release()
-                    os.unlink(tmp_path)
-                    
-                    if len(frames) == 0:
-                        st.error("No valid frame timeline found inside this asset file.")
-                        is_engine_ready = False
-                    else:
-                        st.success(f"Successfully processed {len(frames)} frames!")
+                                    # Scale to readable standard target constraint bounds
+                                    resized_cv = cv2.resize(frame, (safe_width * 12, safe_height * 22))
+                                    _, buffer = cv2.imencode('.jpg', resized_cv)
+                                    b64_frame = base64.b64encode(buffer).decode('utf-8')
+                                    
+                                    style_prompt = ""
+                                    if char_style == "Blocks (Solid Shape)":
+                                        style_prompt = "Use ONLY these character weights: ' ', '░', '▒', '▓', '█'. Avoid random noises, ensure crisp boundaries."
+                                    elif char_style == "Standard ASCII":
+                                        style_prompt = "Use standard character gradients: ' ', '.', ':', '!', 'o', '*', '#', '&', '@'."
+                                    else:
+                                        style_prompt = "Use high-fidelity character options: ' ', '.', ',', '-', '~', ':', '+', '=', 'x', 'o', '*', '#', '%', '@', '█'."
+                                        
+                                    if invert_contrast:
+                                        style_prompt += " INVERT the priority rules so dark areas get lighter weights and bright elements get structural block priority."
+                                    
+                                    prompt_content = f"""
+                                    Convert this structural image frame into an incredibly crisp, clear, scannable text art matrix matrix layout.
+                                    Target Resolution Bounds: Must fit exactly {safe_width} characters per row, and {safe_height} total rows.
+                                    Optimization Rules:
+                                    - This will render inside a Discord dark mode markdown codeblock template block.
+                                    - Keep the lines precisely sharp. Do not blur features into a massive unreadable block blob.
+                                    - {style_prompt}
+                                    Return ONLY the raw text characters matrix grid. Do not append conversational chatter, notes, formatting, backticks, or fences.
+                                    """
+                                    
+                                    try:
+                                        ai_client = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
+                                        response = ai_client.chat.completions.create(
+                                            model=ai_model_name,
+                                            messages=[
+                                                {
+                                                    "role": "user",
+                                                    "content": [
+                                                        {"type": "text", "text": prompt_content.strip()},
+                                                        {"type": "image_url", "image_url": {"url": f"data:image/jpeg;base64,{b64_frame}"}}
+                                                    ]
+                                                }
+                                            ],
+                                            temperature=0.1
+                                        )
+                                        raw_matrix = response.choices[0].message.content.replace("```", "").strip()
+                                        formatted_block = f"```\n{raw_matrix}\n```"
+                                        frames.append(formatted_block)
+                                        time.sleep(0.2) # Small safety spacing break delay
+                                    except Exception as ai_err:
+                                        st.error(f"AI Matrix Frame Processing Error at frame {frame_idx}: {str(ai_err)}")
+                                        is_engine_ready = False
+                                        break
+                            else:
+                                # --- MATHEMATICAL MANIPULATION ENGINE ---
+                                if char_style == "Blocks (Solid Shape)":
+                                    ascii_ramp = [" ", "░", "▒", "▓", "█"]
+                                elif char_style == "Standard ASCII":
+                                    ascii_ramp = [" ", ".", ":", "!", "o", "*", "#", "&", "@"]
+                                else:
+                                    ascii_ramp = [" ", ".", ",", "-", "~", ":", "+", "=", "x", "o", "*", "#", "%", "@", "█"]
+                                    
+                                if invert_contrast: ascii_ramp = ascii_ramp[::-1]
+                                ramp_len = len(ascii_ramp)
+                                
+                                while True:
+                                    ret, frame = cap.read()
+                                    if not ret: break
+                                        
+                                    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                                    resized = cv2.resize(gray, (safe_width, safe_height), interpolation=cv2.INTER_AREA)
+                                    enhanced_grid = cv2.convertScaleAbs(resized, alpha=contrast_val, beta=brightness_val)
+                                    
+                                    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(4,4))
+                                    enhanced_grid = clahe.apply(enhanced_grid)
+                                    
+                                    if edge_sharpness > 0:
+                                        kernel = np.array([[0, -1, 0], [-1, 4 + edge_sharpness, -1], [0, -1, 0]], dtype=np.float32) / (2 + edge_sharpness)
+                                        enhanced_grid = cv2.filter2D(enhanced_grid, -1, kernel)
+                                    
+                                    matrix_lines = []
+                                    for row in enhanced_grid:
+                                        line_chars = []
+                                        for pixel in row:
+                                            idx = int((pixel / 256.0) * ramp_len)
+                                            idx = max(0, min(idx, ramp_len - 1))
+                                            line_chars.append(ascii_ramp[idx])
+                                        matrix_lines.append("".join(line_chars))
+                                            
+                                    formatted_block = "```\n" + "\n".join(matrix_lines) + "\n```"
+                                    frames.append(formatted_block)
+                                    
+                        cap.release()
+                        os.unlink(tmp_path)
                         
-                except Exception as e:
-                    st.error(f"Engine failure: {str(e)}")
-                    is_engine_ready = False
+                        if len(frames) == 0:
+                            st.error("No valid frame timelines found inside file sequence targets.")
+                            is_engine_ready = False
+                        else:
+                            st.success(f"Successfully configured and loaded {len(frames)} optimized target frames!")
+                            
+                    except Exception as e:
+                        st.error(f"Engine pipeline exception event: {str(e)}")
+                        is_engine_ready = False
         else: is_engine_ready = False
     else: frames = animation_presets[selected_anim]
 
@@ -649,7 +700,7 @@ with tabs[24]:
     if st.button("🚀 Fire 2D Animation", use_container_width=True, disabled=not is_engine_ready):
         if token and anim_ch and frames:
             h = get_headers(token)
-            edit_url = f"https://discord.com/api/v9/channels/{anim_ch}/messages"
+            edit_url = f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){anim_ch}/messages"
             
             first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]})
             if first_frame_res.status_code == 200:
@@ -667,4 +718,4 @@ with tabs[24]:
                             time.sleep(retry_after)
                         time.sleep(frame_delay)
                 status_placeholder.success("✨ Animation processing stream completed successfully!")
-            else: st.error(f"Failed to initiate link pipeline: {first_frame_res.text}")
+            else: st.error(f"Failed to initiate target framework line pipelines: {first_frame_res.text}")
