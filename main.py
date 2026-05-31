@@ -66,6 +66,8 @@ def load_memory(channel_id):
 
 # Sanitization helper to prevent InvalidSchema errors
 def clean_channel_id(ch_str):
+    if not ch_str:
+        return ""
     ch_str = str(ch_str).strip()
     if "channels/" in ch_str:
         parts = [p for p in ch_str.split('/') if p.isdigit()]
@@ -524,7 +526,7 @@ with tabs[23]:
         requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": u_data.get("flags", 0) | 1})
         st.success("Cosmetic flag applied.")
 
-# --- TAB 25: FIXED AI MULTI-ENGINE INTEGRATED ANIMATOR ---
+# --- TAB 25: REINFORCED HARDENED AI MULTI-ENGINE INTEGRATED ANIMATOR ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
     st.info("Converts custom assets into clean structural text blocks optimized for Discord code formatting structures.")
@@ -716,26 +718,45 @@ with tabs[24]:
     frame_delay = st.slider("Frame Delay (Seconds)", 0.5, 3.0, 1.1)
 
     if st.button("🚀 Fire 2D Animation", use_container_width=True, disabled=not is_engine_ready):
-        # Applied sanitization layer here to clean whitespace and link wrappers
         clean_anim_ch = clean_channel_id(anim_ch)
-        if token and clean_anim_ch and frames:
+        if not clean_anim_ch:
+            st.error("❌ Target Channel ID field is empty or completely invalid numbers.")
+        elif not token:
+            st.error("❌ Discord Token is completely missing from your sidebar inputs.")
+        elif not frames:
+            st.error("❌ Animation frame sequence payload matrix buffer is empty.")
+        else:
             h = get_headers(token)
             edit_url = f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){clean_anim_ch}/messages"
             
-            first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]})
-            if first_frame_res.status_code == 200:
-                msg_id = first_frame_res.json()["id"]
-                specific_msg_url = f"{edit_url}/{msg_id}"
-                status_placeholder = st.empty()
-                
-                for current_loop in range(loop_count):
-                    for frame_idx, frame_content in enumerate(frames):
-                        status_placeholder.write(f"🎬 Stream Active: Loop {current_loop + 1}/{loop_count} | Frame {frame_idx + 1}/{len(frames)}")
-                        res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content})
+            # --- CRITICAL REINFORCED ERROR SAFEHOUSE GATEWAY ---
+            if not edit_url.startswith("https://") or " " in edit_url or "None" in edit_url:
+                st.error(f"❌ Aborted payload delivery. Malformed URL generation state detected: `{edit_url}`")
+            else:
+                st.caption(f"📡 Dispatching matrix timeline array onto endpoint: `{edit_url}`")
+                try:
+                    first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]}, timeout=8)
+                    
+                    if first_frame_res.status_code == 200:
+                        msg_id = first_frame_res.json()["id"]
+                        specific_msg_url = f"{edit_url}/{msg_id}"
+                        status_placeholder = st.empty()
                         
-                        if res.status_code == 429:
-                            retry_after = res.json().get("retry_after", 2.0)
-                            time.sleep(retry_after)
-                        time.sleep(frame_delay)
-                status_placeholder.success("✨ Animation processing stream completed successfully!")
-            else: st.error(f"Failed to initiate target framework line pipelines: {first_frame_res.text}")
+                        for current_loop in range(loop_count):
+                            for frame_idx, frame_content in enumerate(frames):
+                                status_placeholder.write(f"🎬 Stream Active: Loop {current_loop + 1}/{loop_count} | Frame {frame_idx + 1}/{len(frames)}")
+                                try:
+                                    res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content}, timeout=5)
+                                    if res.status_code == 429:
+                                        retry_after = res.json().get("retry_after", 2.0)
+                                        time.sleep(retry_after)
+                                except Exception as patch_err:
+                                    status_placeholder.warning(f"⚠️ Dropped frame frame update step #{frame_idx + 1}: {str(patch_err)}")
+                                time.sleep(frame_delay)
+                        status_placeholder.success("✨ Animation processing stream completed successfully!")
+                    else:
+                        st.error(f"❌ Discord Gateway rejected initial message post request. Status Code: {first_frame_res.status_code} - {first_frame_res.text}")
+                except requests.exceptions.InvalidSchema as schema_err:
+                    st.error(f"❌ Connection Adapter Error blocked. The channel ID variable parsed an illegal data layout structure context. Target endpoint evaluated as: `{edit_url}`")
+                except Exception as net_err:
+                    st.error(f"❌ Structural networking error failed execution: {str(net_err)}")
