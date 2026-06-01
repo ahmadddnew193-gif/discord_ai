@@ -19,7 +19,6 @@ MASTER_KEY = st.secrets.get("MASTER_KEY", "CHANGEME")
 CODE_FILE = "active_code.txt"
 MEMORY_FILE = "conversation_memory.json"
 
-# --- GLOBAL ACCESS FUNCTIONS ---
 def set_global_code(code):
     with open(CODE_FILE, "w") as f:
         f.write(f"{code},{time.time()}")
@@ -39,7 +38,6 @@ def log_access_event():
     with open("access_log.txt", "a") as f:
         f.write(f"Access Granted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
 
-# --- MEMORY PERSISTENCE FUNCTIONS ---
 def save_memory(channel_id, summary):
     memory_data = {}
     if os.path.exists(MEMORY_FILE):
@@ -60,16 +58,14 @@ def load_memory(channel_id):
             except: pass
     return "No previous memory."
 
-# Initialize local session state variables
 for s_key, s_val in {
     "access_granted": False,
     "console_logs": ["🤖 System Initialized. Awaiting credentials..."],
-    "custom_ai_frames": []
+    "converted_media_frames": []
 }.items():
     if s_key not in st.session_state:
         st.session_state[s_key] = s_val
 
-# --- LIVE CONSOLE LOGGING HELPER ---
 def log_to_console(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
     log_entry = f"[{timestamp}] {message}"
@@ -77,12 +73,10 @@ def log_to_console(message):
     if len(st.session_state.console_logs) > 40:
         st.session_state.console_logs.pop(0)
 
-# --- REVOKE ALL GLOBAL CHECK ---
 shared_code, shared_time = get_global_code()
 if not shared_code:
     st.session_state.access_granted = False
 
-# --- INACTIVITY TIMEOUT COUNTER ---
 if shared_code and shared_time:
     if st.session_state.access_granted:
         if time.time() - shared_time > 30:
@@ -94,7 +88,6 @@ if shared_code and shared_time:
         st.session_state.access_granted = False
         log_to_console("⚠️ Session expired due to inactivity.")
 
-# --- SIDEBAR LOGIN CONTROL ---
 with st.sidebar:
     st.header("🔐 System Access")
     admin_input = st.text_input("Owner Master Key", type="password", help="Only the owner uses this to generate the session code.")
@@ -136,7 +129,6 @@ if not st.session_state.access_granted:
     st.info("Please contact the administrator for the current global 6-digit access code.")
     st.stop() 
 
-# --- INITIALIZE MAIN DASHBOARD PARAMS ---
 for key, val in {
     "bot_running": False, "tokens": 3.0, "last_time": time.time(),
     "memory": {}, "processed_dms": set(),
@@ -147,7 +139,6 @@ for key, val in {
     if key not in st.session_state:
         st.session_state[key] = val
 
-# --- Helper Functions ---
 def jitter_delay(min_s=0.1, max_s=0.5):
     time.sleep(random.uniform(min_s, max_s))
 
@@ -217,7 +208,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             url_context = f"\n[SYSTEM NOTE: The user provided a link: {urls[0]}. If it's a known site, discuss its likely content.]"
 
         chat_history = [{"role": "system", "content": f"PERSONA: {system_prompt}. Current memory: {long_term_mem}. {url_context}"}]
-        
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers, timeout=5).json()
         
         if isinstance(context_req, list):
@@ -245,7 +235,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         log_to_console(f"❌ Automation runtime error: {str(e)}")
         return False
 
-# --- Sidebar Core Auth Interceptors ---
 with st.sidebar:
     st.header("🔑 Authentication")
     token_input = st.text_input("Discord Token", type="password")
@@ -708,63 +697,46 @@ with tabs[23]:
 
 # --- TAB 25: 2D ANIMATOR (CLOUD & AI REINFORCED) ---
 with tabs[24]:
-    st.header("🎬 2D Text Matrix Animator (Media & AI Reinforced)")
-    st.info("Upload your own video or GIF, choose your frame rendering mode, convert it to sequential structural text payloads, and fire it onto Discord.")
+    st.header("🎬 2D Text Matrix Animator")
+    st.info("Input channel configuration parameters, select a processing model, select your file, and fire animation arrays straight into your active terminal cache.")
     
-    if "converted_media_frames" not in st.session_state:
-        st.session_state.converted_media_frames = []
-
+    # 1. User puts channel id
     anim_ch_raw = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     anim_ch = anim_ch_raw.strip().replace("\r", "").replace("\n", "") if anim_ch_raw else ""
     
-    # Static fallback preset data arrays
-    animation_presets = {
-        "💃 Cyber Punk Dance Loop": [
-            "```\n  \\ \n  \\\\(@)~ \n   ###   \n  _// \\_ \n```",
-            "```\n        \n    (@)/ \n   /###  \n  _/  \\  \n```",
-            "```\n        \n   _@_   \n  (###)  \n  _/ \\_  \n```",
-            "```\n        \n   \\(@)  \n    ###\\ \n    /  \\_\n```"
-        ],
-        "⚽ Bouncing Ball": [
-            "```\n[○      ]\n```",
-            "```\n[  ○    ]\n```",
-            "```\n[    ○  ]\n```",
-            "```\n[      ○]\n```"
-        ],
-        "🤖 Robot Face Blink": [
-            "```\n  [ O _ O ] \n   /|___|\\  \n```",
-            "```\n  [ - _ - ] \n   /|___|\\  \n```"
-        ]
-    }
+    # 2. Then model
+    ai_model_box = st.text_input("AI Model Name / ID String", value="qwen/qwen-2.5-coder-32b-instruct")
     
-    st.markdown("---")
-    st.subheader("🎥 Media Frame Processing Engine")
+    # 3. Then at the bottom chooses the file
+    uploaded_media = st.file_uploader("Choose Video or GIF File", type=["gif", "mp4", "mov", "avi"])
     
-    uploaded_media = st.file_uploader("Upload GIF or Video File", type=["gif", "mp4", "mov", "avi"])
-    render_style = st.selectbox("Text Conversion Type/Style", ["ASCII Art Mode", "Single Block Mode (█/ )", "Shaded Braille Matrix (░▒▓█)"])
-    char_width = st.slider("Render Character Width", 10, 60, 35, help="Lower widths prevent hitting Discord's 2000 character limit.")
+    # 4. Then gives options for one of the three
+    render_style = st.selectbox("Text Conversion Type/Style", ["ASCII Art Mode", "Shaded Braille Matrix (░▒▓█)", "Single Block Mode (█/ )"])
+    char_width = st.slider("Render Width Scaler", 10, 60, 30, help="Lower dimensions maximize compatibility and bypass content bottlenecks.")
 
-    if st.button("🔄 Process & Convert Uploaded Media", use_container_width=True):
+    # 5. Button saying submit model and settings?
+    if st.button("Submit model and settings?", use_container_width=True):
         if not uploaded_media:
-            st.error("Please select and upload a valid file first.")
+            st.error("Please upload a media file asset before initiating conversion.")
+        elif not or_key:
+            st.error("Please insert a valid OpenRouter token in the panel sidebar configuration.")
         else:
-            with st.spinner("Decoding video/GIF layers and mapping pixel frames..."):
+            with st.spinner("Decoding video sequence arrays and optimizing layers via systemic AI pipeline blocks..."):
                 try:
                     from PIL import Image, ImageSequence
                     import io
                     import cv2
                     import tempfile
 
-                    compiled_frames = []
+                    compiled_raw_frames = []
                     file_data_bytes = uploaded_media.read()
                     file_extension = os.path.splitext(uploaded_media.name)[1].lower()
 
-                    def process_pil_frame_to_string(img_frame, style_mode, width_val):
+                    def process_frame_to_text(img_frame, style_mode, width_val):
                         orig_w, orig_h = img_frame.size
                         calculated_height = int((orig_h / orig_w) * width_val * 0.45)
                         if calculated_height < 1: 
                             calculated_height = 1
-                        
                         resized_gray = img_frame.resize((width_val, calculated_height)).convert("L")
                         pixel_values = list(resized_gray.getdata())
 
@@ -782,156 +754,122 @@ with tabs[24]:
                         lines = [text_output[idx:idx+width_val] for idx in range(0, len(text_output), width_val)]
                         return "```\n" + "\n".join(lines) + "\n```"
 
+                    # Automatically processes ANY file length safely by downsampling frames dynamically
                     if file_extension == ".gif":
                         gif_obj = Image.open(io.BytesIO(file_data_bytes))
-                        for single_frame in ImageSequence.Iterator(gif_obj):
-                            compiled_frames.append(process_pil_frame_to_string(single_frame.copy(), render_style, char_width))
+                        all_frames = list(ImageSequence.Iterator(gif_obj))
+                        step = max(1, len(all_frames) // 20)
+                        for i in range(0, len(all_frames), step):
+                            if len(compiled_raw_frames) < 20:
+                                compiled_raw_frames.append(process_frame_to_text(all_frames[i].copy(), render_style, char_width))
                     else:
                         with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_video_file:
                             temp_video_file.write(file_data_bytes)
                             temp_video_file_path = temp_video_file.name
 
                         video_capture = cv2.VideoCapture(temp_video_file_path)
+                        total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
+                        step = max(1, total_frames // 20)
+                        
                         internal_idx = 0
-                        while video_capture.isOpened() and len(compiled_frames) < 35:
+                        while video_capture.isOpened() and len(compiled_raw_frames) < 20:
                             success_flag, bgr_frame = video_capture.read()
-                            if not success_flag:
+                            if not success_flag: 
                                 break
-                            if internal_idx % 4 == 0:
+                            if internal_idx % step == 0:
                                 rgb_converted = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
                                 pil_converted = Image.fromarray(rgb_converted)
-                                compiled_frames.append(process_pil_frame_to_string(pil_converted, render_style, char_width))
+                                compiled_raw_frames.append(process_frame_to_text(pil_converted, render_style, char_width))
                             internal_idx += 1
                         video_capture.release()
-                        try:
+                        try: 
                             os.remove(temp_video_file_path)
-                        except:
+                        except: 
                             pass
 
-                    if compiled_frames:
-                        st.session_state.converted_media_frames = compiled_frames
-                        st.success(f"Successfully compiled {len(compiled_frames)} animation frames into local data cache memory!")
-                        log_to_console(f"🎬 Media Frame Engine: Converted {len(compiled_frames)} frames from {uploaded_media.name} via {render_style}")
+                    if compiled_raw_frames:
+                        # Hardcoded system prompt instructions so the user doesn't type instructions
+                        ai_compiler = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
+                        system_baking_rules = (
+                            "You are an AI data matrix formatting terminal block. You receive an array of ascii string layouts. "
+                            "Output EXACTLY a clean, valid JSON array of strings containing these frames, with codeblocks correctly closed. "
+                            "Do NOT output any chat conversational text, descriptions, notes, markdown tips, or warnings. Output ONLY the raw parseable JSON array object."
+                        )
+                        
+                        ai_response = ai_compiler.chat.completions.create(
+                            model=ai_model_box.strip(),
+                            messages=[
+                                {"role": "system", "content": system_baking_rules},
+                                {"role": "user", "content": f"Format and filter these sequential animation frames to ensure layout parsing stability: {json.dumps(compiled_raw_frames)}"}
+                            ]
+                        )
+                        
+                        raw_response_data = ai_response.choices[0].message.content
+                        cleaned_json_data = re.sub(r"```json|```", "", raw_response_data).strip()
+                        
+                        try:
+                            final_frames = json.loads(cleaned_json_data)
+                            if isinstance(final_frames, list) and len(final_frames) > 0:
+                                st.session_state.converted_media_frames = final_frames
+                            else:
+                                st.session_state.converted_media_frames = compiled_raw_frames
+                        except:
+                            st.session_state.converted_media_frames = compiled_raw_frames
+                            
+                        st.success(f"Successfully optimized and cached {len(st.session_state.converted_media_frames)} fluid animation sequences in active storage.")
+                        log_to_console(f"🎬 Media Frame Engine: Baked data array track using model validation for: {uploaded_media.name}")
                     else:
-                        st.error("Frame compilation yielded an empty matrix array list structure.")
-                except Exception as conversion_fault:
-                    st.error(f"Media stream error formatting logic arrays: {str(conversion_fault)}")
-                    log_to_console(f"❌ Media processing compiler crash flag: {str(conversion_fault)}")
+                        st.error("Frame layout indexing processing returned an empty layer tree.")
+                except Exception as ex_fault:
+                    st.error(f"Processing structural anomaly: {str(ex_fault)}")
+                    log_to_console(f"❌ Core processing runtime crash: {str(ex_fault)}")
 
     st.markdown("---")
-    st.subheader("🧠 Live AI Frame Builder Generator")
-    
-    ai_model_box = st.text_input("AI Model Name / ID String", value="qwen/qwen-2.5-coder-32b-instruct")
-    ai_frame_prompt = st.text_area("Describe Custom Animation Action Sequence", value="A 4-frame loading circle radar loop where a bracket spins like [|], [/], [-], [\\] inside markdown blocks.")
-    
-    if st.button("💾 Submit Model & Process Frame Sequences", use_container_width=True):
-        if not or_key:
-            st.error("Please insert a valid OpenRouter API Key in the application sidebar config.")
-        else:
-            ai_status_placeholder = st.empty()
-            ai_status_placeholder.info("⚙️ Initializing model frame compiling engine logic thingy...")
-            
-            try:
-                ai_compiler = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
-                system_baking_rules = (
-                    "You are a raw ASCII chat animation compiling matrix processor. "
-                    "Output EXACTLY a clean, valid JSON array of string elements, representing animation frames sequentially. "
-                    "Each string frame must contain the structural ASCII art drawing block surrounded by markdown syntax codeblocks "
-                    "like: ```\\n[art here]\\n```. Do NOT output any description text, notes, conversational headers, or commentary. "
-                    "Output ONLY the standard parseable JSON array. Example pattern format: [\"```\\nframe1\\n```\", \"```\\nframe2\\n```\"]"
-                )
-                
-                # Request framing generation layer
-                ai_response = ai_compiler.chat.completions.create(
-                    model=ai_model_box.strip(),
-                    messages=[
-                        {"role": "system", "content": system_baking_rules},
-                        {"role": "user", "content": f"Build this framework animation: {ai_frame_prompt.strip()}"}
-                    ]
-                )
-                
-                raw_response_data = ai_response.choices[0].message.content
-                cleaned_json_data = re.sub(r"```json|```", "", raw_response_data).strip()
-                compiled_frames_array = json.loads(cleaned_json_data)
-                
-                if isinstance(compiled_frames_array, list) and len(compiled_frames_array) > 0:
-                    st.session_state.custom_ai_frames = compiled_frames_array
-                    log_to_console(f"🎬 Matrix Compiled: Generated {len(compiled_frames_array)} animation frames using model {ai_model_box}.")
-                    ai_status_placeholder.success(f"✨ Model array compilation complete! Ready to execute playback. Saved {len(compiled_frames_array)} unique local animation elements.")
-                else:
-                    ai_status_placeholder.error("Model transaction returned invalid formatting schema. Ensure configuration settings are matching rules.")
-            except Exception as generative_error:
-                ai_status_placeholder.error(f"Failed to compile generative layout schemas: {str(generative_error)}")
-                log_to_console(f"❌ Structural AI Compilation failure flag: {str(generative_error)}")
+    loop_count = st.slider("Playback Loop Execution Counts", 1, 10, 3)
+    frame_delay = st.slider("Frame Propagation Sync Intervals", 0.5, 4.0, 1.2)
 
-    st.markdown("---")
-    st.subheader("🕹️ Playback Execution Matrix")
-    
-    # Append options to selection tracking matrix
-    playback_options = list(animation_presets.keys())
-    if st.session_state.converted_media_frames:
-        playback_options.append("🎞️ Converted Video/GIF Media Source Data")
-    if st.session_state.custom_ai_frames:
-        playback_options.append("🧠 AI Generated Custom Loop Data Frame")
-        
-    selected_anim = st.selectbox("Choose Targeted Animation Track", playback_options)
-    loop_count = st.slider("Animation Runtime Loop Multiplier", 1, 10, 3)
-    frame_delay = st.slider("Frame Iteration Sleep Interval", 1.5, 4.0, 2.0)
-
-    if st.button("🚀 Fire 2D Animation Sequence", use_container_width=True):
+    # 6. Button appears saying fire 2d anim, plays instantly from local cache memory without API recalls
+    if st.button("fire 2d anim", use_container_width=True):
         if not token:
-            st.error("Missing valid Discord account verification credentials.")
+            st.error("Missing standard terminal verification tokens.")
         elif not anim_ch:
-            st.error("Missing target text conversation routing endpoint ID string.")
+            st.error("Target distribution conversation pipe routing endpoint cannot be blank.")
+        elif not st.session_state.converted_media_frames:
+            st.error("No framework data found in current memory caches. Submit settings and compile a file first.")
         else:
-            if selected_anim == "🎞️ Converted Video/GIF Media Source Data":
-                frames = st.session_state.converted_media_frames
-            elif selected_anim == "🧠 AI Generated Custom Loop Data Frame":
-                frames = st.session_state.custom_ai_frames
-            else:
-                frames = animation_presets[selected_anim]
-                
+            frames = st.session_state.converted_media_frames
             h = get_headers(token)
             edit_url = f"https://discord.com/api/v9/channels/{str(anim_ch)}/messages"
-            status_placeholder = st.empty()
+            playback_status_box = st.empty()
             
             try:
-                status_placeholder.text("Deploying foundational message matrix container context...")
-                log_to_console(f"🎬 Initializing animation deployment to channel channel target: {anim_ch}")
+                playback_status_box.text("Spawning original matrix node context container...")
+                log_to_console(f"🎬 Launching cached sequence broadcast to channel node: {anim_ch}")
                 
-                # Establishes structural placeholder container
                 first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]}, timeout=10)
                 
                 if first_frame_res.status_code == 200:
                     msg_id = first_frame_res.json()["id"]
                     specific_msg_url = f"{edit_url}/{msg_id}"
                     
-                    # RUNS LOCAL CACHE MEMORY - NO API CALL REPEATS FOR AI CORE THROUGH THIS CONTEXT
+                    # Runs locally off internal state - no extra processing calls to avoid crashing loops
                     for current_loop in range(loop_count):
                         for frame_idx, frame_content in enumerate(frames):
-                            status_placeholder.write(f"🎬 Playing Sequence: Loop {current_loop + 1}/{loop_count} | Frame {frame_idx + 1}")
-                            
+                            playback_status_box.write(f"🎬 Local Playback Run: Cycle {current_loop + 1}/{loop_count} | Index Frame {frame_idx + 1}")
                             res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content}, timeout=10)
                             
                             if res.status_code == 429:
                                 retry_after = res.json().get("retry_after", 3)
-                                status_placeholder.warning(f"⏳ Dynamic rate threshold adjustment hit. Pausing code execution for {retry_after}s...")
-                                log_to_console(f"⏳ Rate restriction encounter. Auto-cooling process thread for {retry_after} seconds.")
                                 time.sleep(retry_after)
-                            elif res.status_code != 200:
-                                status_placeholder.error(f"⚠️ Gateway Notice: Response channel index returned code {res.status_code}")
                             
                             time.sleep(frame_delay)
                     
-                    status_placeholder.success("✨ Animation array processing complete!")
-                    log_to_console(f"✨ Sequence execution loop complete inside targeted runtime node.")
+                    playback_status_box.success("✨ Stream loop transactions successfully completed from state arrays!")
+                    log_to_console("✨ Array pipeline execution broadcast finalized successfully.")
                 else:
-                    st.error(f"Failed to secure network payload framework allocation: {first_frame_res.text}")
-            
-            except requests.exceptions.Timeout:
-                st.error("❌ Link layer connection timeout flagged.")
-            except requests.exceptions.RequestException as network_err:
-                st.error(f"❌ Network handshake tracking delivery issue: {network_err}")
+                    st.error(f"Initialization frame error response index: {first_frame_res.text}")
+            except Exception as stream_fault:
+                st.error(f"Terminal stream exception flagged: {str(stream_fault)}")
 
 # --- REAL-TIME LIVE CONSOLE MONITOR INTERFACE ---
 st.divider()
