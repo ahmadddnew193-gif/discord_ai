@@ -695,7 +695,7 @@ with tabs[23]:
             else:
                 st.error(f"Failed to patch structural status: {res.status_code}")
 
-# --- TAB 25: 2D ANIMATOR (CLOUD & AI REINFORCED) ---
+# --- TAB 25: 2D ANIMATOR (GOOGLE API POWERED) ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
     st.info("Input channel configuration parameters, select a processing model, select your file, and fire animation arrays straight into your active terminal cache.")
@@ -705,7 +705,10 @@ with tabs[24]:
     anim_ch = anim_ch_raw.strip().replace("\r", "").replace("\n", "") if anim_ch_raw else ""
     
     # 2. Then model
-    ai_model_box = st.text_input("AI Model Name / ID String", value="qwen/qwen-2.5-coder-32b-instruct")
+    ai_model_box = st.text_input("Google Model ID String", value="gemini-1.5-flash")
+    
+    # Google API Key text field added locally within this tab's configuration
+    google_api_key = st.text_input("Google Gemini API Key", type="password", key="anim_google_key").strip()
     
     # 3. Then at the bottom chooses the file
     uploaded_media = st.file_uploader("Choose Video or GIF File", type=["gif", "mp4", "mov", "avi"])
@@ -718,8 +721,8 @@ with tabs[24]:
     if st.button("Submit model and settings?", use_container_width=True):
         if not uploaded_media:
             st.error("Please upload a media file asset before initiating conversion.")
-        elif not or_key:
-            st.error("Please insert a valid OpenRouter token in the panel sidebar configuration.")
+        elif not google_api_key:
+            st.error("Please insert a valid Google Gemini API Key in the field above.")
         else:
             with st.spinner("Decoding video sequence arrays and optimizing layers via systemic AI pipeline blocks..."):
                 try:
@@ -789,35 +792,48 @@ with tabs[24]:
 
                     if compiled_raw_frames:
                         # Hardcoded system prompt instructions so the user doesn't type instructions
-                        ai_compiler = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
                         system_baking_rules = (
                             "You are an AI data matrix formatting terminal block. You receive an array of ascii string layouts. "
                             "Output EXACTLY a clean, valid JSON array of strings containing these frames, with codeblocks correctly closed. "
                             "Do NOT output any chat conversational text, descriptions, notes, markdown tips, or warnings. Output ONLY the raw parseable JSON array object."
                         )
                         
-                        ai_response = ai_compiler.chat.completions.create(
-                            model=ai_model_box.strip(),
-                            messages=[
-                                {"role": "system", "content": system_baking_rules},
-                                {"role": "user", "content": f"Format and filter these sequential animation frames to ensure layout parsing stability: {json.dumps(compiled_raw_frames)}"}
-                            ]
-                        )
+                        # Use web request directly to avoid missing SDK dependency issues
+                        model_name = ai_model_box.strip() if ai_model_box.strip() else "gemini-1.5-flash"
+                        gemini_endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={google_api_key}"
                         
-                        raw_response_data = ai_response.choices[0].message.content
-                        cleaned_json_data = re.sub(r"```json|```", "", raw_response_data).strip()
+                        api_payload = {
+                            "contents": [{
+                                "parts": [{"text": f"Format and filter these sequential animation frames to ensure layout parsing stability: {json.dumps(compiled_raw_frames)}"}]
+                            }],
+                            "systemInstruction": {
+                                "parts": [{"text": system_baking_rules}]
+                            },
+                            "generationConfig": {
+                                "responseMimeType": "application/json"
+                            }
+                        }
                         
-                        try:
-                            final_frames = json.loads(cleaned_json_data)
-                            if isinstance(final_frames, list) and len(final_frames) > 0:
-                                st.session_state.converted_media_frames = final_frames
-                            else:
+                        response = requests.post(gemini_endpoint, json=api_payload, timeout=30)
+                        
+                        if response.status_code == 200:
+                            res_json = response.json()
+                            raw_response_data = res_json["candidates"][0]["content"]["parts"][0]["text"]
+                            cleaned_json_data = re.sub(r"```json|```", "", raw_response_data).strip()
+                            
+                            try:
+                                final_frames = json.loads(cleaned_json_data)
+                                if isinstance(final_frames, list) and len(final_frames) > 0:
+                                    st.session_state.converted_media_frames = final_frames
+                                else:
+                                    st.session_state.converted_media_frames = compiled_raw_frames
+                            except:
                                 st.session_state.converted_media_frames = compiled_raw_frames
-                        except:
-                            st.session_state.converted_media_frames = compiled_raw_frames
+                        else:
+                            raise Exception(f"Google API Error {response.status_code}: {response.text}")
                             
                         st.success(f"Successfully optimized and cached {len(st.session_state.converted_media_frames)} fluid animation sequences in active storage.")
-                        log_to_console(f"🎬 Media Frame Engine: Baked data array track using model validation for: {uploaded_media.name}")
+                        log_to_console(f"🎬 Media Frame Engine: Baked data array track using Google API validation for: {uploaded_media.name}")
                     else:
                         st.error("Frame layout indexing processing returned an empty layer tree.")
                 except Exception as ex_fault:
