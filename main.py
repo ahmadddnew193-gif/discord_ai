@@ -708,9 +708,12 @@ with tabs[23]:
 
 # --- TAB 25: 2D ANIMATOR (CLOUD & AI REINFORCED) ---
 with tabs[24]:
-    st.header("🎬 2D Text Matrix Animator (AI Framework Enhanced)")
-    st.info("Bakes a custom ASCII frame sequence from an AI generation engine, stores it securely, then runs playback safely out of cache memory.")
+    st.header("🎬 2D Text Matrix Animator (Media & AI Reinforced)")
+    st.info("Upload your own video or GIF, choose your frame rendering mode, convert it to sequential structural text payloads, and fire it onto Discord.")
     
+    if "converted_media_frames" not in st.session_state:
+        st.session_state.converted_media_frames = []
+
     anim_ch_raw = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     anim_ch = anim_ch_raw.strip().replace("\r", "").replace("\n", "") if anim_ch_raw else ""
     
@@ -734,6 +737,87 @@ with tabs[24]:
         ]
     }
     
+    st.markdown("---")
+    st.subheader("🎥 Media Frame Processing Engine")
+    
+    uploaded_media = st.file_uploader("Upload GIF or Video File", type=["gif", "mp4", "mov", "avi"])
+    render_style = st.selectbox("Text Conversion Type/Style", ["ASCII Art Mode", "Single Block Mode (█/ )", "Shaded Braille Matrix (░▒▓█)"])
+    char_width = st.slider("Render Character Width", 10, 60, 35, help="Lower widths prevent hitting Discord's 2000 character limit.")
+
+    if st.button("🔄 Process & Convert Uploaded Media", use_container_width=True):
+        if not uploaded_media:
+            st.error("Please select and upload a valid file first.")
+        else:
+            with st.spinner("Decoding video/GIF layers and mapping pixel frames..."):
+                try:
+                    from PIL import Image, ImageSequence
+                    import io
+                    import cv2
+                    import tempfile
+
+                    compiled_frames = []
+                    file_data_bytes = uploaded_media.read()
+                    file_extension = os.path.splitext(uploaded_media.name)[1].lower()
+
+                    def process_pil_frame_to_string(img_frame, style_mode, width_val):
+                        orig_w, orig_h = img_frame.size
+                        calculated_height = int((orig_h / orig_w) * width_val * 0.45)
+                        if calculated_height < 1: 
+                            calculated_height = 1
+                        
+                        resized_gray = img_frame.resize((width_val, calculated_height)).convert("L")
+                        pixel_values = list(resized_gray.getdata())
+
+                        if style_mode == "ASCII Art Mode":
+                            character_ramp = " .:-=+*#%@"
+                            ramp_len = len(character_ramp)
+                            text_output = "".join([character_ramp[int(v * (ramp_len - 1) / 255)] for v in pixel_values])
+                        elif style_mode == "Single Block Mode (█/ )":
+                            text_output = "".join(["█" if v < 128 else " " for v in pixel_values])
+                        else:
+                            character_ramp = " ░▒▓█"
+                            ramp_len = len(character_ramp)
+                            text_output = "".join([character_ramp[int(v * (ramp_len - 1) / 255)] for v in pixel_values])
+
+                        lines = [text_output[idx:idx+width_val] for idx in range(0, len(text_output), width_val)]
+                        return "```\n" + "\n".join(lines) + "\n```"
+
+                    if file_extension == ".gif":
+                        gif_obj = Image.open(io.BytesIO(file_data_bytes))
+                        for single_frame in ImageSequence.Iterator(gif_obj):
+                            compiled_frames.append(process_pil_frame_to_string(single_frame.copy(), render_style, char_width))
+                    else:
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_video_file:
+                            temp_video_file.write(file_data_bytes)
+                            temp_video_file_path = temp_video_file.name
+
+                        video_capture = cv2.VideoCapture(temp_video_file_path)
+                        internal_idx = 0
+                        while video_capture.isOpened() and len(compiled_frames) < 35:
+                            success_flag, bgr_frame = video_capture.read()
+                            if not success_flag:
+                                break
+                            if internal_idx % 4 == 0:
+                                rgb_converted = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
+                                pil_converted = Image.fromarray(rgb_converted)
+                                compiled_frames.append(process_pil_frame_to_string(pil_converted, render_style, char_width))
+                            internal_idx += 1
+                        video_capture.release()
+                        try:
+                            os.remove(temp_video_file_path)
+                        except:
+                            pass
+
+                    if compiled_frames:
+                        st.session_state.converted_media_frames = compiled_frames
+                        st.success(f"Successfully compiled {len(compiled_frames)} animation frames into local data cache memory!")
+                        log_to_console(f"🎬 Media Frame Engine: Converted {len(compiled_frames)} frames from {uploaded_media.name} via {render_style}")
+                    else:
+                        st.error("Frame compilation yielded an empty matrix array list structure.")
+                except Exception as conversion_fault:
+                    st.error(f"Media stream error formatting logic arrays: {str(conversion_fault)}")
+                    log_to_console(f"❌ Media processing compiler crash flag: {str(conversion_fault)}")
+
     st.markdown("---")
     st.subheader("🧠 Live AI Frame Builder Generator")
     
@@ -783,8 +867,10 @@ with tabs[24]:
     st.markdown("---")
     st.subheader("🕹️ Playback Execution Matrix")
     
-    # Append the custom generated array to selection options if loaded
+    # Append options to selection tracking matrix
     playback_options = list(animation_presets.keys())
+    if st.session_state.converted_media_frames:
+        playback_options.append("🎞️ Converted Video/GIF Media Source Data")
     if st.session_state.custom_ai_frames:
         playback_options.append("🧠 AI Generated Custom Loop Data Frame")
         
@@ -798,7 +884,9 @@ with tabs[24]:
         elif not anim_ch:
             st.error("Missing target text conversation routing endpoint ID string.")
         else:
-            if selected_anim == "🧠 AI Generated Custom Loop Data Frame":
+            if selected_anim == "🎞️ Converted Video/GIF Media Source Data":
+                frames = st.session_state.converted_media_frames
+            elif selected_anim == "🧠 AI Generated Custom Loop Data Frame":
                 frames = st.session_state.custom_ai_frames
             else:
                 frames = animation_presets[selected_anim]
