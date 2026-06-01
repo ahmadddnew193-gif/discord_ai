@@ -60,16 +60,29 @@ def load_memory(channel_id):
             except: pass
     return "No previous memory."
 
-# Initialize local session state
-if "access_granted" not in st.session_state:
-    st.session_state.access_granted = False
+# Initialize local session state variables
+for s_key, s_val in {
+    "access_granted": False,
+    "console_logs": ["🤖 System Initialized. Awaiting credentials..."],
+    "custom_ai_frames": []
+}.items():
+    if s_key not in st.session_state:
+        st.session_state[s_key] = s_val
+
+# --- LIVE CONSOLE LOGGING HELPER ---
+def log_to_console(message):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
+    log_entry = f"[{timestamp}] {message}"
+    st.session_state.console_logs.append(log_entry)
+    if len(st.session_state.console_logs) > 40:
+        st.session_state.console_logs.pop(0)
 
 # --- REVOKE ALL GLOBAL CHECK ---
 shared_code, shared_time = get_global_code()
 if not shared_code:
     st.session_state.access_granted = False
 
-# --- UPDATED INACTIVITY LOGIC ---
+# --- INACTIVITY TIMEOUT COUNTER ---
 if shared_code and shared_time:
     if st.session_state.access_granted:
         if time.time() - shared_time > 30:
@@ -79,6 +92,7 @@ if shared_code and shared_time:
         if os.path.exists(CODE_FILE):
             os.remove(CODE_FILE)
         st.session_state.access_granted = False
+        log_to_console("⚠️ Session expired due to inactivity.")
 
 # --- SIDEBAR LOGIN CONTROL ---
 with st.sidebar:
@@ -92,11 +106,13 @@ with st.sidebar:
                 new_code = str(random.randint(100000, 999999))
                 set_global_code(new_code)
                 st.success(f"CODE: {new_code}")
+                log_to_console(f"🎟️ Owner generated new access key code token.")
         with col_rev:
             if st.button("🚫 Revoke All"):
                 if os.path.exists(CODE_FILE):
                     os.remove(CODE_FILE)
                 st.session_state.access_granted = False
+                log_to_console("🛑 Master revocation activated. All terminals locked.")
                 st.warning("Access Revoked")
                 st.rerun()
     
@@ -109,18 +125,18 @@ with st.sidebar:
             if current_valid_code and user_code_attempt == current_valid_code:
                 st.session_state.access_granted = True
                 log_access_event()
+                log_to_console("🔓 Access code accepted. Dashboard environment unlocked.")
                 st.rerun()
             else:
                 st.error("Invalid or Expired Code")
+                log_to_console("❌ Unauthorized connection attempt with invalid access key.")
 
 if not st.session_state.access_granted:
     st.title("🛡️ System Dashboard - Locked")
     st.info("Please contact the administrator for the current global 6-digit access code.")
     st.stop() 
 
-# --- START OF MAIN CODE APPLICATION ---
-st.title("Discord Utility Panel & Automation Hub")
-
+# --- INITIALIZE MAIN DASHBOARD PARAMS ---
 for key, val in {
     "bot_running": False, "tokens": 3.0, "last_time": time.time(),
     "memory": {}, "processed_dms": set(),
@@ -222,12 +238,14 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             st.session_state.last_ai_content = reply.strip()
             requests.post(discord_url, json={"content": reply}, headers=headers, timeout=5)
             log_to_csv(author_username, content, "Reply Sent")
+            log_to_console(f"🤖 AI responded to [{author_username}] in channel {channel_id}")
             return True
     except Exception as e:
         st.session_state.debug_log = f"Error: {str(e)}"
+        log_to_console(f"❌ Automation runtime error: {str(e)}")
         return False
 
-# --- Sidebar Bot Settings ---
+# --- Sidebar Core Auth Interceptors ---
 with st.sidebar:
     st.header("🔑 Authentication")
     token_input = st.text_input("Discord Token", type="password")
@@ -311,10 +329,12 @@ with tabs[0]:
         if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
             st.session_state.bot_running = True
             st.session_state.bot_start_time = time.time()
+            log_to_console(f"🟢 Discord AI Core Listener Activated on channel: {channel_id_input}")
             st.rerun()
     with c2:
         if st.button("🛑 Stop Bot", use_container_width=True):
             st.session_state.bot_running = False
+            log_to_console("🛑 Discord AI Core Listener Powered Down.")
             st.rerun()
 
     if st.session_state.bot_running:
@@ -345,6 +365,7 @@ with tabs[1]:
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
     if st.button("🔍 Scrape"):
         if token and channel_id_input:
+            log_to_console(f"📥 Querying message history arrays inside channel ID: {channel_id_input}")
             res = requests.get(f"https://discord.com/api/v9/channels/{channel_id_input}/messages?limit={limit}", headers=get_headers(token), timeout=5)
             if res.status_code == 200: 
                 st.dataframe(pd.DataFrame([{"Author": m['author']['username'], "Content": m['content']} for m in res.json()]))
@@ -360,6 +381,7 @@ with tabs[2]:
             except: st.error("Memory file corrupted.")
     if st.button("Clear Memory File"):
         if os.path.exists(MEMORY_FILE): os.remove(MEMORY_FILE)
+        log_to_console("🧠 AI local conversational short-term memory files wiped clean.")
         st.success("Memory Nuked.")
 
 # --- TAB 4: SERVER HARVESTER ---
@@ -368,6 +390,7 @@ with tabs[3]:
     target_guild = st.text_input("Target Server ID").strip().replace("\r","").replace("\n","")
     if st.button("📥 Harvest Emojis"):
         if token and target_guild:
+            log_to_console(f"🌾 Extracting structural custom graphic payload arrays from server: {target_guild}")
             res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild}", headers=get_headers(token), timeout=5).json()
             if 'emojis' in res:
                 for e in res['emojis']:
@@ -385,6 +408,7 @@ with tabs[4]:
             ext = "gif" if is_animated else "png"
             emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=48"
             requests.post(f"https://discord.com/api/v9/channels/{target_ch}/messages", headers=get_headers(token), json={"content": emoji_url}, timeout=5)
+            log_to_console(f"💎 Dispatched spoofed Nitro graphic layout to channel: {target_ch}")
             st.success("Emoji Sent!")
 
 # --- TAB 6: SNOWFLAKE DECODER ---
@@ -402,6 +426,7 @@ with tabs[6]:
     st.header("📱 Authorized App Hunter")
     if st.button("🔍 Scan Applications", use_container_width=True):
         if token:
+            log_to_console("📱 Scanning targeted token OAuth2 structural application clearances.")
             apps = requests.get("https://discord.com/api/v9/oauth2/tokens", headers=get_headers(token), timeout=5).json()
             if apps and isinstance(apps, list):
                 for a in apps:
@@ -416,6 +441,7 @@ with tabs[7]:
     if st.button("📡 Scan Voice Channel", use_container_width=True):
         if token and target_guild_id and target_vc_id:
             h = get_headers(token)
+            log_to_console(f"🎙️ Querying audio space user allocations on voice space channel: {target_vc_id}")
             res = requests.get(f"https://discord.com/api/v9/channels/{target_vc_id}", headers=h, timeout=5)
             if res.status_code == 200:
                 mem_res = requests.get(f"https://discord.com/api/v9/guilds/{target_guild_id}/members?limit=100", headers=h, timeout=5)
@@ -435,7 +461,9 @@ with tabs[8]:
             h = get_headers(token)
             sb_url = f"https://discord.com/api/v9/channels/{sound_ch_id}/voice-channel-effects"
             res = requests.post(sb_url, headers=h, json={"sound_id": sound_id, "source_guild_id": sound_guild_id if sound_guild_id else None}, timeout=5)
-            if res.status_code == 204: st.success("Sound Played!")
+            if res.status_code == 204: 
+                log_to_console(f"🔊 Soundboard vector index packet triggered to channel: {sound_ch_id}")
+                st.success("Sound Played!")
 
 # --- TAB 10: HYPESQUAD ---
 with tabs[9]:
@@ -445,6 +473,7 @@ with tabs[9]:
     if st.button("Apply"):
         if token:
             requests.post("https://discord.com/api/v9/hypesquad/online", headers=get_headers(token), json={"house_id": house_map[house]}, timeout=5)
+            log_to_console(f"✨ Account properties context altered to badge state: HypeSquad {house}")
             st.success("House Applied")
 
 # --- TAB 11: ACCOUNT AUDIT ---
@@ -461,7 +490,9 @@ with tabs[11]:
     wh_url = st.text_input("Webhook URL").strip().replace("\r","").replace("\n","")
     wh_msg = st.text_area("Message content")
     if st.button("Fire"): 
-        if wh_url: requests.post(wh_url, json={"content": wh_msg}, timeout=5)
+        if wh_url: 
+            requests.post(wh_url, json={"content": wh_msg}, timeout=5)
+            log_to_console("📢 External API data string fired to webhook collector targets.")
 
 # --- TAB 13: MESSAGE GHOSTER ---
 with tabs[12]:
@@ -471,11 +502,13 @@ with tabs[12]:
     if st.button("🔥 Purge My Messages", use_container_width=True):
         if token and my_id and ghost_ch:
             h = get_headers(token)
+            log_to_console(f"👻 Commencing hidden frame tracking deletion matrix in channel: {ghost_ch}")
             msgs = requests.get(f"https://discord.com/api/v9/channels/{ghost_ch}/messages?limit={ghost_limit}", headers=h, timeout=5).json()
             if isinstance(msgs, list):
                 for m in msgs:
                     if m['author']['id'] == my_id:
                         requests.delete(f"https://discord.com/api/v9/channels/{ghost_ch}/messages/{m['id']}", headers=h, timeout=5)
+                        log_to_console(f"🗑️ Cleaned message index payload element: {m['id']}")
                         time.sleep(1.2)
 
 # --- TAB 14: TEXT COLOR ---
@@ -493,8 +526,12 @@ with tabs[13]:
 # --- TAB 15: INFINITE TYPING ---
 with tabs[14]:
     st.header("⏳ Infinite Typing Indicator")
-    if st.button("🚀 Start Infinite Typing", use_container_width=True): st.session_state.typing_active = True
-    if st.button("🛑 Stop Typing", use_container_width=True): st.session_state.typing_active = False
+    if st.button("🚀 Start Infinite Typing", use_container_width=True): 
+        st.session_state.typing_active = True
+        log_to_console("⏳ Infinite typing simulator loop active.")
+    if st.button("🛑 Stop Typing", use_container_width=True): 
+        st.session_state.typing_active = False
+        log_to_console("⏳ Infinite typing loop deactivated.")
     if st.session_state.typing_active and token and channel_id_input:
         requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/typing", headers=get_headers(token), timeout=5)
         time.sleep(random.randint(5, 8))
@@ -508,6 +545,7 @@ with tabs[15]:
     with t_col: search_type = st.selectbox("Search Scope", ["Web", "News", "Images"])
     if st.button("Execute Intelligence Search", use_container_width=True):
         if search_query:
+            log_to_console(f"🔎 Triggering clear-net indexing algorithm for keyword: {search_query}")
             with DDGS() as ddgs:
                 if search_type == "Web":
                     results = list(ddgs.text(search_query, max_results=10))
@@ -549,7 +587,9 @@ with tabs[16]:
             headers = get_headers(token)
             payload = {"status": act_status, "activities": [{"type": 0, "application_id": app_id, "name": game_name, "details": details, "assets": {"large_image": large_image_key, "large_text": large_text}, "buttons": [b1_label], "metadata": {"button_urls": [b1_url]}}]}
             res = requests.patch("https://discord.com/api/v9/users/@me/settings", headers=headers, json=payload, timeout=5)
-            if res.status_code == 200: st.success("Presence Applied!")
+            if res.status_code == 200: 
+                log_to_console("🎭 Custom client-profile simulation payload updated.")
+                st.success("Presence Applied!")
             else: st.error(f"Error: {res.text}")
 
 # --- TAB 18: STICKER SPOOFER ---
@@ -577,6 +617,7 @@ with tabs[18]:
                     up_res = requests.post(f"https://{server}.gofile.io/uploadFile", files={'file': (uploaded_file.name, uploaded_file.getvalue())}, timeout=30).json()
                     dl_url = up_res['data']['downloadPage']
                     requests.post(f"https://discord.com/api/v9/channels/{file_ch}/messages", headers=get_headers(token), json={"content": f"📁 **File:** {uploaded_file.name}\n🔗 {dl_url}"}, timeout=5)
+                    log_to_console(f"📦 Bridged file reference data payload link to target channel.")
                     st.success("Sent!")
                 except: st.error("Bridge failure.")
 
@@ -587,19 +628,21 @@ with tabs[19]:
     if st.button("Apply Invisible Bio"):
         if token:
             requests.patch("https://discord.com/api/v9/users/@me", headers=get_headers(token), json={"bio": "\u17b5"}, timeout=5)
+            log_to_console("👤 Injected structural zero-width whitespace element to user profile biography.")
             st.success("Bio Ghosted.")
 
 # --- TAB 21: BIO ANIMATOR ---
 with tabs[20]:
     st.header("🌀 Bio Animator")
-    st.info("Rotates your bio text. Warning: Changing too fast may lead to a temporary rate limit.")
     bio_frames = st.text_area("Bio Frames (One per line)", "Coding...\nDeveloping...\nControl Hub Active...")
     anim_speed = st.slider("Animation Speed (Seconds)", 30, 300, 60)
     
     if st.button("▶️ Start Bio Animation", use_container_width=True):
         st.session_state.bio_anim_active = True
+        log_to_console("🌀 Biography rotational updating frame logic active.")
     if st.button("🛑 Stop Animation", use_container_width=True):
         st.session_state.bio_anim_active = False
+        log_to_console("🌀 Biography rotational updating frame logic halted.")
 
     if st.session_state.bio_anim_active and token:
         frames = [f.strip() for f in bio_frames.split("\n") if f.strip()]
@@ -613,7 +656,6 @@ with tabs[20]:
 # --- TAB 22: GHOST PINGER ---
 with tabs[21]:
     st.header("👻 Ghost Pinger")
-    st.info("Sends a mention and deletes it immediately.")
     ghost_target_id = st.text_input("User ID to Ghost Ping").strip().replace("\r","").replace("\n","")
     ghost_ch_id = st.text_input("Channel ID", value=channel_id_input, key="ghost_ping_ch").strip().replace("\r","").replace("\n","")
     
@@ -625,6 +667,7 @@ with tabs[21]:
             if res.status_code == 200:
                 msg_id = res.json()['id']
                 requests.delete(f"{ping_url}/{msg_id}", headers=h, timeout=5)
+                log_to_console(f"👻 Dispatched and redacted user tag ping context vector targeting ID: {ghost_target_id}")
                 st.success("Ghost Ping Delivered.")
 
 # --- TAB 23: SERVER CLONER ---
@@ -635,6 +678,7 @@ with tabs[22]:
     if st.button("📂 Export Server Structure", use_container_width=True):
         if token and clone_guild_id:
             h = get_headers(token)
+            log_to_console(f"📋 Exporting layout schema configurations for guild element ID: {clone_guild_id}")
             guild_data = requests.get(f"https://discord.com/api/v9/guilds/{clone_guild_id}", headers=h, timeout=5).json()
             channels = requests.get(f"https://discord.com/api/v9/guilds/{clone_guild_id}/channels", headers=h, timeout=5).json()
             
@@ -648,9 +692,7 @@ with tabs[22]:
 # --- TAB 24: NITRO BADGE ---
 with tabs[23]:
     st.header("💎 Nitro Badge Spoofer")
-    st.warning("⚠️ Warning: Manipulating account flags is purely cosmetic and local to the API's response layer.")
     nitro_bit = 1 
-    
     if st.button("✨ Apply Nitro Badge", use_container_width=True):
         if token:
             h = get_headers(token)
@@ -659,18 +701,20 @@ with tabs[23]:
             new_flags = current_flags | nitro_bit
             res = requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": new_flags}, timeout=5)
             if res.status_code == 200:
+                log_to_console(f"💎 Local profile database response flags patched to: {new_flags}")
                 st.success(f"Flags successfully patched locally to: {new_flags}")
             else:
                 st.error(f"Failed to patch structural status: {res.status_code}")
 
-# --- TAB 25: 2D ANIMATOR (CLOUD OPTIMIZED) ---
+# --- TAB 25: 2D ANIMATOR (CLOUD & AI REINFORCED) ---
 with tabs[24]:
-    st.header("🎬 2D Text Matrix Animator")
-    st.info("Sends a text matrix and edits it frame-by-frame. Optimized to securely execute through Streamlit Cloud firewalls.")
+    st.header("🎬 2D Text Matrix Animator (AI Framework Enhanced)")
+    st.info("Bakes a custom ASCII frame sequence from an AI generation engine, stores it securely, then runs playback safely out of cache memory.")
     
     anim_ch_raw = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     anim_ch = anim_ch_raw.strip().replace("\r", "").replace("\n", "") if anim_ch_raw else ""
     
+    # Static fallback preset data arrays
     animation_presets = {
         "💃 Cyber Punk Dance Loop": [
             "```\n  \\ \n  \\\\(@)~ \n   ###   \n  _// \\_ \n```",
@@ -690,49 +734,120 @@ with tabs[24]:
         ]
     }
     
-    selected_anim = st.selectbox("Choose Animation Preset", list(animation_presets.keys()))
-    loop_count = st.slider("Animation Loops", 1, 10, 3)
-    frame_delay = st.slider("Frame Delay (Seconds)", 1.5, 4.0, 2.0, help="Streamlit Cloud proxy layers require steady delays to prevent delivery drops.")
-
-    if st.button("🚀 Fire 2D Animation", use_container_width=True):
-        if not token:
-            st.error("Missing Discord Token configuration.")
-        elif not anim_ch:
-            st.error("Missing valid Target Channel ID configuration.")
+    st.markdown("---")
+    st.subheader("🧠 Live AI Frame Builder Generator")
+    
+    ai_model_box = st.text_input("AI Model Name / ID String", value="qwen/qwen-2.5-coder-32b-instruct")
+    ai_frame_prompt = st.text_area("Describe Custom Animation Action Sequence", value="A 4-frame loading circle radar loop where a bracket spins like [|], [/], [-], [\\] inside markdown blocks.")
+    
+    if st.button("💾 Submit Model & Process Frame Sequences", use_container_width=True):
+        if not or_key:
+            st.error("Please insert a valid OpenRouter API Key in the application sidebar config.")
         else:
-            frames = animation_presets[selected_anim]
+            ai_status_placeholder = st.empty()
+            ai_status_placeholder.info("⚙️ Initializing model frame compiling engine logic thingy...")
+            
+            try:
+                ai_compiler = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
+                system_baking_rules = (
+                    "You are a raw ASCII chat animation compiling matrix processor. "
+                    "Output EXACTLY a clean, valid JSON array of string elements, representing animation frames sequentially. "
+                    "Each string frame must contain the structural ASCII art drawing block surrounded by markdown syntax codeblocks "
+                    "like: ```\\n[art here]\\n```. Do NOT output any description text, notes, conversational headers, or commentary. "
+                    "Output ONLY the standard parseable JSON array. Example pattern format: [\"```\\nframe1\\n```\", \"```\\nframe2\\n```\"]"
+                )
+                
+                # Request framing generation layer
+                ai_response = ai_compiler.chat.completions.create(
+                    model=ai_model_box.strip(),
+                    messages=[
+                        {"role": "system", "content": system_baking_rules},
+                        {"role": "user", "content": f"Build this framework animation: {ai_frame_prompt.strip()}"}
+                    ]
+                )
+                
+                raw_response_data = ai_response.choices[0].message.content
+                cleaned_json_data = re.sub(r"```json|```", "", raw_response_data).strip()
+                compiled_frames_array = json.loads(cleaned_json_data)
+                
+                if isinstance(compiled_frames_array, list) and len(compiled_frames_array) > 0:
+                    st.session_state.custom_ai_frames = compiled_frames_array
+                    log_to_console(f"🎬 Matrix Compiled: Generated {len(compiled_frames_array)} animation frames using model {ai_model_box}.")
+                    ai_status_placeholder.success(f"✨ Model array compilation complete! Ready to execute playback. Saved {len(compiled_frames_array)} unique local animation elements.")
+                else:
+                    ai_status_placeholder.error("Model transaction returned invalid formatting schema. Ensure configuration settings are matching rules.")
+            except Exception as generative_error:
+                ai_status_placeholder.error(f"Failed to compile generative layout schemas: {str(generative_error)}")
+                log_to_console(f"❌ Structural AI Compilation failure flag: {str(generative_error)}")
+
+    st.markdown("---")
+    st.subheader("🕹️ Playback Execution Matrix")
+    
+    # Append the custom generated array to selection options if loaded
+    playback_options = list(animation_presets.keys())
+    if st.session_state.custom_ai_frames:
+        playback_options.append("🧠 AI Generated Custom Loop Data Frame")
+        
+    selected_anim = st.selectbox("Choose Targeted Animation Track", playback_options)
+    loop_count = st.slider("Animation Runtime Loop Multiplier", 1, 10, 3)
+    frame_delay = st.slider("Frame Iteration Sleep Interval", 1.5, 4.0, 2.0)
+
+    if st.button("🚀 Fire 2D Animation Sequence", use_container_width=True):
+        if not token:
+            st.error("Missing valid Discord account verification credentials.")
+        elif not anim_ch:
+            st.error("Missing target text conversation routing endpoint ID string.")
+        else:
+            if selected_anim == "🧠 AI Generated Custom Loop Data Frame":
+                frames = st.session_state.custom_ai_frames
+            else:
+                frames = animation_presets[selected_anim]
+                
             h = get_headers(token)
             edit_url = f"https://discord.com/api/v9/channels/{str(anim_ch)}/messages"
             status_placeholder = st.empty()
             
             try:
-                status_placeholder.text("Deploying foundational matrix frame...")
+                status_placeholder.text("Deploying foundational message matrix container context...")
+                log_to_console(f"🎬 Initializing animation deployment to channel channel target: {anim_ch}")
+                
+                # Establishes structural placeholder container
                 first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]}, timeout=10)
                 
                 if first_frame_res.status_code == 200:
                     msg_id = first_frame_res.json()["id"]
                     specific_msg_url = f"{edit_url}/{msg_id}"
                     
+                    # RUNS LOCAL CACHE MEMORY - NO API CALL REPEATS FOR AI CORE THROUGH THIS CONTEXT
                     for current_loop in range(loop_count):
                         for frame_idx, frame_content in enumerate(frames):
-                            status_placeholder.write(f"🎬 Playing: Loop {current_loop + 1}/{loop_count} | Frame {frame_idx + 1}")
+                            status_placeholder.write(f"🎬 Playing Sequence: Loop {current_loop + 1}/{loop_count} | Frame {frame_idx + 1}")
+                            
                             res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content}, timeout=10)
                             
                             if res.status_code == 429:
                                 retry_after = res.json().get("retry_after", 3)
-                                status_placeholder.warning(f"⏳ Rate limit handled. Pausing thread for {retry_after}s...")
+                                status_placeholder.warning(f"⏳ Dynamic rate threshold adjustment hit. Pausing code execution for {retry_after}s...")
+                                log_to_console(f"⏳ Rate restriction encounter. Auto-cooling process thread for {retry_after} seconds.")
                                 time.sleep(retry_after)
                             elif res.status_code != 200:
-                                status_placeholder.error(f"⚠️ Transmission Notice: Gateway returned status code {res.status_code}")
+                                status_placeholder.error(f"⚠️ Gateway Notice: Response channel index returned code {res.status_code}")
                             
                             time.sleep(frame_delay)
                     
-                    status_placeholder.success("✨ Animation sequence completed processing on Streamlit Cloud!")
+                    status_placeholder.success("✨ Animation array processing complete!")
+                    log_to_console(f"✨ Sequence execution loop complete inside targeted runtime node.")
                 else:
-                    st.error(f"Failed to bind payload structure. Server responded: {first_frame_res.text}")
+                    st.error(f"Failed to secure network payload framework allocation: {first_frame_res.text}")
             
             except requests.exceptions.Timeout:
-                st.error("❌ Connection Timeout: Cloud server proxy layer terminated outbound connection states.")
+                st.error("❌ Link layer connection timeout flagged.")
             except requests.exceptions.RequestException as network_err:
-                st.error(f"❌ Handshake Delivery Failure: Ensure your ID string is alphanumeric. Ref: {network_err}")
-                
+                st.error(f"❌ Network handshake tracking delivery issue: {network_err}")
+
+# --- REAL-TIME LIVE CONSOLE MONITOR INTERFACE ---
+st.divider()
+st.subheader("📟 Live Operational Control Terminal Console")
+console_container = st.empty()
+with console_container.container():
+    st.code("\n".join(st.session_state.console_logs), language="text")
