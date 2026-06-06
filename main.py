@@ -7,7 +7,6 @@ import os
 from datetime import datetime
 import random
 import pandas as pd
-import base64
 import json
 import re
 from duckduckgo_search import DDGS
@@ -509,8 +508,7 @@ with tabs[13]:
     if st.button("🖌️ Send Colored Text", use_container_width=True):
         if token and channel_id_input:
             code = color_codes[color_choice]
-            ansi_payload = f"```ansi\n\u001b[{code}m{color_text}
-```"
+            ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
             requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload}, timeout=5)
 
 # --- TAB 15: INFINITE TYPING ---
