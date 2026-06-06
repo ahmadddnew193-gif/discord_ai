@@ -695,18 +695,18 @@ with tabs[23]:
             else:
                 st.error(f"Failed to patch structural status: {res.status_code}")
 
-# --- TAB 25: 2D ANIMATOR (LOCAL ENGINE OPTIMIZATION) ---
+# --- TAB 25: 2D ANIMATOR (OPTIMIZED STREAM MATRIX ENGINE) ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
-    st.info("Input channel parameters, upload a file, and compile the text arrays instantly without relying on slow external APIs.")
+    st.info("Compile your media frames locally. Keep widths between 25-35 to prevent line wrapping glitch glitches in Discord chat.")
     
     anim_ch_raw = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     anim_ch = anim_ch_raw.strip().replace("\r", "").replace("\n", "") if anim_ch_raw else ""
     
     uploaded_media = st.file_uploader("Choose Video or GIF File", type=["gif", "mp4", "mov", "avi"])
     
-    render_style = st.selectbox("Text Conversion Type/Style", ["ASCII Art Mode", "Shaded Braille Matrix (░▒▓█)", "Single Block Mode (█/ )"])
-    char_width = st.slider("Render Width Scaler", 10, 60, 30, help="Lower dimensions maximize compatibility and bypass content bottlenecks.")
+    render_style = st.selectbox("Text Conversion Type/Style", ["Shaded Braille Matrix (░▒▓█)", "ASCII Art Mode", "Single Block Mode (█/ )"])
+    char_width = st.slider("Render Width Scaler (Set 25-35 for Discord)", 10, 60, 30, help="Controls line-length resolution width. Going above 35 wraps lines inside chat windows.")
 
     if st.button("Compile Animation Frames", use_container_width=True):
         if not uploaded_media:
@@ -778,7 +778,6 @@ with tabs[24]:
                             pass
 
                     if compiled_raw_frames:
-                        # Save directly to local cache layout memory instantly! No network requests needed.
                         st.session_state.converted_media_frames = compiled_raw_frames
                         st.success(f"Successfully processed and cached {len(st.session_state.converted_media_frames)} fluid animation sequences instantly!")
                         log_to_console(f"🎬 Media Frame Engine: Processed locally for: {uploaded_media.name}")
@@ -790,7 +789,7 @@ with tabs[24]:
 
     st.markdown("---")
     loop_count = st.slider("Playback Loop Execution Counts", 1, 10, 3)
-    frame_delay = st.slider("Frame Propagation Sync Intervals", 0.5, 4.0, 1.2)
+    frame_delay = st.slider("Frame Propagation Sync Intervals (Keep at 1.5s+)", 0.5, 4.0, 1.5, help="Setting this under 1.5s triggers immediate 429 Discord bans on the message.")
 
     if st.button("fire 2d anim", use_container_width=True):
         if not token:
@@ -818,11 +817,22 @@ with tabs[24]:
                     for current_loop in range(loop_count):
                         for frame_idx, frame_content in enumerate(frames):
                             playback_status_box.write(f"🎬 Local Playback Run: Cycle {current_loop + 1}/{loop_count} | Index Frame {frame_idx + 1}")
-                            res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content}, timeout=10)
                             
-                            if res.status_code == 429:
-                                retry_after = res.json().get("retry_after", 3)
-                                time.sleep(retry_after)
+                            # --- STABLE FORCE-FRAME RETRY ENGINE ---
+                            frame_updated = False
+                            while not frame_updated:
+                                res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content}, timeout=10)
+                                
+                                if res.status_code == 200:
+                                    frame_updated = True
+                                elif res.status_code == 429:
+                                    # Hit a rate limit slowdown code -> read Discord's timer block and sleep
+                                    retry_after = res.json().get("retry_after", 2.0)
+                                    playback_status_box.warning(f"⏳ Discord Throttle! Sync cooling for {retry_after}s...")
+                                    time.sleep(retry_after)
+                                else:
+                                    playback_status_box.error(f"❌ Aborted frame execution connection state: {res.status_code}")
+                                    break
                             
                             time.sleep(frame_delay)
                     
