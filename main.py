@@ -509,7 +509,8 @@ with tabs[13]:
     if st.button("🖌️ Send Colored Text", use_container_width=True):
         if token and channel_id_input:
             code = color_codes[color_choice]
-            ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
+            ansi_payload = f"```ansi\n\u001b[{code}m{color_text}
+```"
             requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload}, timeout=5)
 
 # --- TAB 15: INFINITE TYPING ---
@@ -695,153 +696,169 @@ with tabs[23]:
             else:
                 st.error(f"Failed to patch structural status: {res.status_code}")
 
-# --- TAB 25: 2D ANIMATOR (OPTIMIZED STREAM MATRIX ENGINE) ---
+# --- TAB 25: 2D ANIMATOR (ROBUST PIPELINE MATRIX ENGINE) ---
 with tabs[24]:
-    st.header("🎬 2D Text Matrix Animator")
-    st.info("Compile your media frames locally. Keep widths between 25-35 to prevent line wrapping glitch glitches in Discord chat.")
+    st.header("🎬 Advanced 2D Media Vector Engine")
+    st.info("Converts video or GIF media files into highly accurate text sequences optimized for Discord Markdown windows without breaking layouts.")
     
     anim_ch_raw = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     anim_ch = anim_ch_raw.strip().replace("\r", "").replace("\n", "") if anim_ch_raw else ""
     
-    uploaded_media = st.file_uploader("Choose Video or GIF File", type=["gif", "mp4", "mov", "avi"])
+    uploaded_media = st.file_uploader("Upload Target Animation Asset (GIF, MP4, MOV)", type=["gif", "mp4", "mov", "avi"])
     
-    render_style = st.selectbox("Text Conversion Type/Style", ["Shaded Braille Matrix (░▒▓█)", "ASCII Art Mode", "Single Block Mode (█/ )"])
-    char_width = st.slider("Render Width Scaler (Set 25-35 for Discord)", 10, 60, 30, help="Controls line-length resolution width. Going above 35 wraps lines inside chat windows.")
+    render_style = st.selectbox(
+        "Render Style Mapping Profile", 
+        ["Detailed ASCII Text Spectrum", "High-Density Shaded Matrix (█▓▒░ )", "Solid Contrast Blocks (█/ )"]
+    )
+    
+    char_width = st.slider("Target Width Matrix (Characters)", 15, 45, 28, help="Controls horizontal scaling. Keeping this between 25-32 guarantees frames will fit within standard Discord window boundaries.")
 
-    if st.button("Compile Animation Frames", use_container_width=True):
+    if st.button("Run Full Deconstruction & Build Frames", use_container_width=True):
         if not uploaded_media:
-            st.error("Please upload a media file asset before initiating conversion.")
+            st.error("Please supply a valid media asset payload before initiating compilation.")
         else:
-            with st.spinner("Decoding video sequence arrays and optimizing layers locally..."):
+            with st.spinner("Extracting complete structural frame trees and applying density maps..."):
                 try:
                     from PIL import Image, ImageSequence
                     import io
                     import cv2
                     import tempfile
 
-                    compiled_raw_frames = []
-                    file_data_bytes = uploaded_media.read()
-                    file_extension = os.path.splitext(uploaded_media.name)[1].lower()
+                    st.session_state.converted_media_frames = []
+                    compiled_frames = []
+                    file_bytes = uploaded_media.read()
+                    file_ext = os.path.splitext(uploaded_media.name)[1].lower()
 
-                    def process_frame_to_text(img_frame, style_mode, width_val):
-                        orig_w, orig_h = img_frame.size
-                        calculated_height = int((orig_h / orig_w) * width_val * 0.45)
-                        if calculated_height < 1: 
-                            calculated_height = 1
-                        resized_gray = img_frame.resize((width_val, calculated_height)).convert("L")
-                        pixel_values = list(resized_gray.getdata())
+                    # Precision text mapping array parser
+                    def target_render_frame(pil_img, style, target_w):
+                        orig_w, orig_h = pil_img.size
+                        # Precise font aspect multiplier adjustment to counter standard terminal row-stretching
+                        target_h = int((orig_h / orig_w) * target_w * 0.50)
+                        if target_h < 1: 
+                            target_h = 1
+                            
+                        # Standardize color tracking data to gray spectrum mapping arrays
+                        gray_img = pil_img.resize((target_w, target_h)).convert("L")
+                        pixels = list(gray_img.getdata())
 
-                        if style_mode == "ASCII Art Mode":
-                            character_ramp = " .:-=+*#%@"
-                            ramp_len = len(character_ramp)
-                            text_output = "".join([character_ramp[int(v * (ramp_len - 1) / 255)] for v in pixel_values])
-                        elif style_mode == "Single Block Mode (█/ )":
-                            text_output = "".join(["█" if v < 128 else " " for v in pixel_values])
+                        if style == "Detailed ASCII Text Spectrum":
+                            # Deep contrast density sequence map for rich visual representation
+                            density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
+                            ramp_len = len(density_ramp)
+                            text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels])
+                        elif style == "Solid Contrast Blocks (█/ )":
+                            text_map = "".join(["█" if v < 110 else " " for v in pixels])
                         else:
-                            character_ramp = " ░▒▓█"
-                            ramp_len = len(character_ramp)
-                            text_output = "".join([character_ramp[int(v * (ramp_len - 1) / 255)] for v in pixel_values])
+                            # Shaded structural gradient
+                            density_ramp = "█▓▒░ "
+                            ramp_len = len(density_ramp)
+                            text_map = "".join([density_ramp[int(v * (ramp_len - 1) / 255)] for v in pixels])
 
-                        lines = [text_output[idx:idx+width_val] for idx in range(0, len(text_output), width_val)]
+                        # Group string data into precise line arrays
+                        lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
                         return "```\n" + "\n".join(lines) + "\n```"
 
-                    if file_extension == ".gif":
-                        gif_obj = Image.open(io.BytesIO(file_data_bytes))
-                        all_frames = list(ImageSequence.Iterator(gif_obj))
-                        step = max(1, len(all_frames) // 20)
-                        for i in range(0, len(all_frames), step):
-                            if len(compiled_raw_frames) < 20:
-                                compiled_raw_frames.append(process_frame_to_text(all_frames[i].copy(), render_style, char_width))
+                    # Handle native multi-layer GIF assets cleanly without frame clipping
+                    if file_ext == ".gif":
+                        gif_sequence = Image.open(io.BytesIO(file_bytes))
+                        frame_index = 0
+                        for frame in ImageSequence.Iterator(gif_sequence):
+                            # Capture every 2nd frame to optimize processing while preserving motion
+                            if frame_index % 2 == 0:
+                                converted_layer = target_render_frame(frame.copy(), render_style, char_width)
+                                compiled_frames.append(converted_layer)
+                            frame_index += 1
                     else:
-                        with tempfile.NamedTemporaryFile(delete=False, suffix=file_extension) as temp_video_file:
-                            temp_video_file.write(file_data_bytes)
-                            temp_video_file_path = temp_video_file.name
+                        # Process video files
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_video:
+                            temp_video.write(file_bytes)
+                            temp_path = temp_video.name
 
-                        video_capture = cv2.VideoCapture(temp_video_file_path)
-                        total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
-                        step = max(1, total_frames // 20)
-                        
-                        internal_idx = 0
-                        while video_capture.isOpened() and len(compiled_raw_frames) < 20:
-                            success_flag, bgr_frame = video_capture.read()
-                            if not success_flag: 
+                        cap = cv2.VideoCapture(temp_path)
+                        frame_count = 0
+                        while cap.isOpened():
+                            ret, frame_bgr = cap.read()
+                            if not ret:
                                 break
-                            if internal_idx % step == 0:
-                                rgb_converted = cv2.cvtColor(bgr_frame, cv2.COLOR_BGR2RGB)
-                                pil_converted = Image.fromarray(rgb_converted)
-                                compiled_raw_frames.append(process_frame_to_text(pil_converted, render_style, char_width))
-                            internal_idx += 1
-                        video_capture.release()
-                        try: 
-                            os.remove(temp_video_file_path)
-                        except: 
-                            pass
+                            # Keep playback fluid by targeting an optimal framing window rate
+                            if frame_count % 3 == 0:
+                                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                                pil_frame = Image.fromarray(frame_rgb)
+                                compiled_frames.append(target_render_frame(pil_frame, render_style, char_width))
+                            frame_count += 1
+                        cap.release()
+                        try: os.remove(temp_path)
+                        except: pass
 
-                    if compiled_raw_frames:
-                        st.session_state.converted_media_frames = compiled_raw_frames
-                        st.success(f"Successfully processed and cached {len(st.session_state.converted_media_frames)} fluid animation sequences instantly!")
-                        log_to_console(f"🎬 Media Frame Engine: Processed locally for: {uploaded_media.name}")
+                    # Enforce strict safety payload limits for stable transmission
+                    if len(compiled_frames) > 45:
+                        # Slice array evenly to optimize performance within technical safety guidelines
+                        step = len(compiled_frames) // 40
+                        compiled_frames = compiled_frames[::step][:40]
+
+                    if compiled_frames:
+                        st.session_state.converted_media_frames = compiled_frames
+                        st.success(f"Successfully processed {len(compiled_frames)} optimized frames!")
+                        log_to_console(f"🎬 Vector Core: Deconstructed asset successfully into text matrices.")
                     else:
-                        st.error("Frame layout indexing processing returned an empty layer tree.")
-                except Exception as ex_fault:
-                    st.error(f"Processing structural anomaly: {str(ex_fault)}")
-                    log_to_console(f"❌ Core processing runtime crash: {str(ex_fault)}")
+                        st.error("Could not extract frame data trees from asset file.")
+                except Exception as err:
+                    st.error(f"Compilation error: {str(err)}")
+                    log_to_console(f"❌ Structural failure during processing: {str(err)}")
 
     st.markdown("---")
-    loop_count = st.slider("Playback Loop Execution Counts", 1, 10, 3)
-    frame_delay = st.slider("Frame Propagation Sync Intervals (Keep at 1.5s+)", 0.5, 4.0, 1.5, help="Setting this under 1.5s triggers immediate 429 Discord bans on the message.")
+    playback_loops = st.slider("Total Structural Playback Loops", 1, 5, 2)
+    base_delay = st.slider("Safe Frame Delay Interval (Seconds)", 0.8, 3.0, 1.3)
 
-    if st.button("fire 2d anim", use_container_width=True):
+    if st.button("🚀 Fire Precision 2D Matrix Stream", use_container_width=True):
         if not token:
-            st.error("Missing standard terminal verification tokens.")
+            st.error("Authentication token missing.")
         elif not anim_ch:
-            st.error("Target distribution conversation pipe routing endpoint cannot be blank.")
-        elif not st.session_state.converted_media_frames:
-            st.error("No framework data found in current memory caches. Upload a file and compile frames first.")
+            st.error("Target transmission channel ID missing.")
+        elif not st.session_state.get("converted_media_frames"):
+            st.error("No framework data cached. Build your frames first.")
         else:
-            frames = st.session_state.converted_media_frames
-            h = get_headers(token)
-            edit_url = f"https://discord.com/api/v9/channels/{str(anim_ch)}/messages"
-            playback_status_box = st.empty()
+            frames_to_send = st.session_state.converted_media_frames
+            h_vars = get_headers(token)
+            base_url = f"https://discord.com/api/v9/channels/{str(anim_ch)}/messages"
+            monitor = st.empty()
             
             try:
-                playback_status_box.text("Spawning original matrix node context container...")
-                log_to_console(f"🎬 Launching cached sequence broadcast to channel node: {anim_ch}")
+                monitor.info("Spawning parent markdown tracking node inside channel...")
+                init_post = requests.post(base_url, headers=h_vars, json={"content": frames_to_send[0]}, timeout=10)
                 
-                first_frame_res = requests.post(edit_url, headers=h, json={"content": frames[0]}, timeout=10)
-                
-                if first_frame_res.status_code == 200:
-                    msg_id = first_frame_res.json()["id"]
-                    specific_msg_url = f"{edit_url}/{msg_id}"
+                if init_post.status_code == 200:
+                    deployed_msg_id = init_post.json()["id"]
+                    patch_target_url = f"{base_url}/{deployed_msg_id}"
                     
-                    for current_loop in range(loop_count):
-                        for frame_idx, frame_content in enumerate(frames):
-                            playback_status_box.write(f"🎬 Local Playback Run: Cycle {current_loop + 1}/{loop_count} | Index Frame {frame_idx + 1}")
+                    for current_loop in range(playback_loops):
+                        for idx, frame_payload in enumerate(frames_to_send):
+                            monitor.markdown(f"**Streaming Frames:** Loop `{current_loop + 1}/{playback_loops}` | Executing Index `{idx + 1}/{len(frames_to_send)}`")
                             
-                            # --- STABLE FORCE-FRAME RETRY ENGINE ---
-                            frame_updated = False
-                            while not frame_updated:
-                                res = requests.patch(specific_msg_url, headers=h, json={"content": frame_content}, timeout=10)
+                            # --- STABLE FORCE-FRAME RETRY LOOP WITH DYNAMIC BACKOFF ---
+                            transaction_complete = False
+                            while not transaction_complete:
+                                patch_res = requests.patch(patch_target_url, headers=h_vars, json={"content": frame_payload}, timeout=10)
                                 
-                                if res.status_code == 200:
-                                    frame_updated = True
-                                elif res.status_code == 429:
-                                    # Hit a rate limit slowdown code -> read Discord's timer block and sleep
-                                    retry_after = res.json().get("retry_after", 2.0)
-                                    playback_status_box.warning(f"⏳ Discord Throttle! Sync cooling for {retry_after}s...")
-                                    time.sleep(retry_after)
+                                if patch_res.status_code == 200:
+                                    transaction_complete = True
+                                    time.sleep(base_delay)
+                                elif patch_res.status_code == 429:
+                                    # Dynamically capture Discord's exact cooldown requirements
+                                    rate_limit_data = patch_res.json()
+                                    backoff_timer = float(rate_limit_data.get("retry_after", 1.5))
+                                    monitor.warning(f"⏳ Rate Limit Triggered. Cool-down active: `{backoff_timer}s`...")
+                                    time.sleep(backoff_timer + 0.1)
                                 else:
-                                    playback_status_box.error(f"❌ Aborted frame execution connection state: {res.status_code}")
-                                    break
-                            
-                            time.sleep(frame_delay)
+                                    monitor.error(f"❌ Connection pipeline failure code: {patch_res.status_code}")
+                                    transaction_complete = True # Force breakthrough on fatal channel blocks
                     
-                    playback_status_box.success("✨ Stream loop transactions successfully completed from state arrays!")
-                    log_to_console("✨ Array pipeline execution broadcast finalized successfully.")
+                    monitor.success("✨ Sequence array streaming successfully finalized!")
+                    log_to_console("✨ 2D Matrix Engine operation wrapped up safely.")
                 else:
-                    st.error(f"Initialization frame error response index: {first_frame_res.text}")
-            except Exception as stream_fault:
-                st.error(f"Terminal stream exception flagged: {str(stream_fault)}")
+                    st.error(f"Failed to initialize parent node container: {init_post.text}")
+            except Exception as stream_err:
+                st.error(f"Streaming anomaly detected: {str(stream_err)}")
 
 # --- REAL-TIME LIVE CONSOLE MONITOR INTERFACE ---
 st.divider()
