@@ -695,36 +695,24 @@ with tabs[23]:
             else:
                 st.error(f"Failed to patch structural status: {res.status_code}")
 
-# --- TAB 25: 2D ANIMATOR (GOOGLE API POWERED) ---
+# --- TAB 25: 2D ANIMATOR (LOCAL ENGINE OPTIMIZATION) ---
 with tabs[24]:
     st.header("🎬 2D Text Matrix Animator")
-    st.info("Input channel configuration parameters, select a processing model, select your file, and fire animation arrays straight into your active terminal cache.")
+    st.info("Input channel parameters, upload a file, and compile the text arrays instantly without relying on slow external APIs.")
     
-    # 1. User puts channel id
     anim_ch_raw = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     anim_ch = anim_ch_raw.strip().replace("\r", "").replace("\n", "") if anim_ch_raw else ""
     
-    # 2. Then model
-    ai_model_box = st.text_input("Google Model ID String", value="gemini-1.5-flash")
-    
-    # Google API Key text field added locally within this tab's configuration
-    google_api_key = st.text_input("Google Gemini API Key", type="password", key="anim_google_key").strip()
-    
-    # 3. Then at the bottom chooses the file
     uploaded_media = st.file_uploader("Choose Video or GIF File", type=["gif", "mp4", "mov", "avi"])
     
-    # 4. Then gives options for one of the three
     render_style = st.selectbox("Text Conversion Type/Style", ["ASCII Art Mode", "Shaded Braille Matrix (░▒▓█)", "Single Block Mode (█/ )"])
     char_width = st.slider("Render Width Scaler", 10, 60, 30, help="Lower dimensions maximize compatibility and bypass content bottlenecks.")
 
-    # 5. Button saying submit model and settings?
-    if st.button("Submit model and settings?", use_container_width=True):
+    if st.button("Compile Animation Frames", use_container_width=True):
         if not uploaded_media:
             st.error("Please upload a media file asset before initiating conversion.")
-        elif not google_api_key:
-            st.error("Please insert a valid Google Gemini API Key in the field above.")
         else:
-            with st.spinner("Decoding video sequence arrays and optimizing layers via systemic AI pipeline blocks..."):
+            with st.spinner("Decoding video sequence arrays and optimizing layers locally..."):
                 try:
                     from PIL import Image, ImageSequence
                     import io
@@ -757,7 +745,6 @@ with tabs[24]:
                         lines = [text_output[idx:idx+width_val] for idx in range(0, len(text_output), width_val)]
                         return "```\n" + "\n".join(lines) + "\n```"
 
-                    # Automatically processes ANY file length safely by downsampling frames dynamically
                     if file_extension == ".gif":
                         gif_obj = Image.open(io.BytesIO(file_data_bytes))
                         all_frames = list(ImageSequence.Iterator(gif_obj))
@@ -791,49 +778,10 @@ with tabs[24]:
                             pass
 
                     if compiled_raw_frames:
-                        # Hardcoded system prompt instructions so the user doesn't type instructions
-                        system_baking_rules = (
-                            "You are an AI data matrix formatting terminal block. You receive an array of ascii string layouts. "
-                            "Output EXACTLY a clean, valid JSON array of strings containing these frames, with codeblocks correctly closed. "
-                            "Do NOT output any chat conversational text, descriptions, notes, markdown tips, or warnings. Output ONLY the raw parseable JSON array object."
-                        )
-                        
-                        # Use web request directly to avoid missing SDK dependency issues
-                        model_name = ai_model_box.strip() if ai_model_box.strip() else "gemini-1.5-flash"
-                        gemini_endpoint = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={google_api_key}"
-                        
-                        api_payload = {
-                            "contents": [{
-                                "parts": [{"text": f"Format and filter these sequential animation frames to ensure layout parsing stability: {json.dumps(compiled_raw_frames)}"}]
-                            }],
-                            "systemInstruction": {
-                                "parts": [{"text": system_baking_rules}]
-                            },
-                            "generationConfig": {
-                                "responseMimeType": "application/json"
-                            }
-                        }
-                        
-                        response = requests.post(gemini_endpoint, json=api_payload, timeout=30)
-                        
-                        if response.status_code == 200:
-                            res_json = response.json()
-                            raw_response_data = res_json["candidates"][0]["content"]["parts"][0]["text"]
-                            cleaned_json_data = re.sub(r"```json|```", "", raw_response_data).strip()
-                            
-                            try:
-                                final_frames = json.loads(cleaned_json_data)
-                                if isinstance(final_frames, list) and len(final_frames) > 0:
-                                    st.session_state.converted_media_frames = final_frames
-                                else:
-                                    st.session_state.converted_media_frames = compiled_raw_frames
-                            except:
-                                st.session_state.converted_media_frames = compiled_raw_frames
-                        else:
-                            raise Exception(f"Google API Error {response.status_code}: {response.text}")
-                            
-                        st.success(f"Successfully optimized and cached {len(st.session_state.converted_media_frames)} fluid animation sequences in active storage.")
-                        log_to_console(f"🎬 Media Frame Engine: Baked data array track using Google API validation for: {uploaded_media.name}")
+                        # Save directly to local cache layout memory instantly! No network requests needed.
+                        st.session_state.converted_media_frames = compiled_raw_frames
+                        st.success(f"Successfully processed and cached {len(st.session_state.converted_media_frames)} fluid animation sequences instantly!")
+                        log_to_console(f"🎬 Media Frame Engine: Processed locally for: {uploaded_media.name}")
                     else:
                         st.error("Frame layout indexing processing returned an empty layer tree.")
                 except Exception as ex_fault:
@@ -844,14 +792,13 @@ with tabs[24]:
     loop_count = st.slider("Playback Loop Execution Counts", 1, 10, 3)
     frame_delay = st.slider("Frame Propagation Sync Intervals", 0.5, 4.0, 1.2)
 
-    # 6. Button appears saying fire 2d anim, plays instantly from local cache memory without API recalls
     if st.button("fire 2d anim", use_container_width=True):
         if not token:
             st.error("Missing standard terminal verification tokens.")
         elif not anim_ch:
             st.error("Target distribution conversation pipe routing endpoint cannot be blank.")
         elif not st.session_state.converted_media_frames:
-            st.error("No framework data found in current memory caches. Submit settings and compile a file first.")
+            st.error("No framework data found in current memory caches. Upload a file and compile frames first.")
         else:
             frames = st.session_state.converted_media_frames
             h = get_headers(token)
@@ -868,7 +815,6 @@ with tabs[24]:
                     msg_id = first_frame_res.json()["id"]
                     specific_msg_url = f"{edit_url}/{msg_id}"
                     
-                    # Runs locally off internal state - no extra processing calls to avoid crashing loops
                     for current_loop in range(loop_count):
                         for frame_idx, frame_content in enumerate(frames):
                             playback_status_box.write(f"🎬 Local Playback Run: Cycle {current_loop + 1}/{loop_count} | Index Frame {frame_idx + 1}")
