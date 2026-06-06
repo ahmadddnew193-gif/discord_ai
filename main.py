@@ -509,9 +509,9 @@ with tabs[13]:
     if st.button("🖌️ Send Colored Text", use_container_width=True):
         if token and channel_id_input:
             code = color_codes[color_choice]
-            ansi_payload = f"```ansi\n\u001b[{code}m{color_text}
-```"
-            requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload}, timeout=5)
+            bt = "```"
+            ansi_payload = f"{bt}ansi\n\x1b[{code}m{color_text}{bt}"
+            requests.post(f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload}, timeout=5)
 
 # --- TAB 15: INFINITE TYPING ---
 with tabs[14]:
@@ -523,7 +523,7 @@ with tabs[14]:
         st.session_state.typing_active = False
         log_to_console("⏳ Infinite typing loop deactivated.")
     if st.session_state.typing_active and token and channel_id_input:
-        requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/typing", headers=get_headers(token), timeout=5)
+        requests.post(f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){channel_id_input}/typing", headers=get_headers(token), timeout=5)
         time.sleep(random.randint(5, 8))
         st.rerun()
 
@@ -569,14 +569,14 @@ with tabs[16]:
         large_text = st.text_input("Image Hover Text", value="Verified")
     with col_btn:
         b1_label = st.text_input("Button 1 Label", value="YouTube Channel")
-        b1_url = st.text_input("Button 1 URL", value="https://youtube.com").strip().replace("\r","").replace("\n","")
+        b1_url = st.text_input("Button 1 URL", value="[https://youtube.com](https://youtube.com)").strip().replace("\r","").replace("\n","")
         act_status = st.selectbox("Appearance", ["online", "idle", "dnd", "invisible"], key="ntts_status")
 
     if st.button("✨ Apply NTTS Presence", use_container_width=True):
         if token and app_id:
             headers = get_headers(token)
             payload = {"status": act_status, "activities": [{"type": 0, "application_id": app_id, "name": game_name, "details": details, "assets": {"large_image": large_image_key, "large_text": large_text}, "buttons": [b1_label], "metadata": {"button_urls": [b1_url]}}]}
-            res = requests.patch("https://discord.com/api/v9/users/@me/settings", headers=headers, json=payload, timeout=5)
+            res = requests.patch("[https://discord.com/api/v9/users/@me/settings](https://discord.com/api/v9/users/@me/settings)", headers=headers, json=payload, timeout=5)
             if res.status_code == 200: 
                 log_to_console("🎭 Custom client-profile simulation payload updated.")
                 st.success("Presence Applied!")
@@ -590,8 +590,8 @@ with tabs[17]:
     if st.button("🚀 Send Spoofed Sticker", use_container_width=True):
         if stick_id and token and stick_ch:
             h = get_headers(token)
-            sticker_url = f"https://cdn.discordapp.com/stickers/{stick_id}.png?size=160"
-            requests.post(f"https://discord.com/api/v9/channels/{stick_ch}/messages", headers=h, json={"content": sticker_url}, timeout=5)
+            sticker_url = f"[https://cdn.discordapp.com/stickers/](https://cdn.discordapp.com/stickers/){stick_id}.png?size=160"
+            requests.post(f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){stick_ch}/messages", headers=h, json={"content": sticker_url}, timeout=5)
             st.success("Sticker Sent!")
 
 # --- TAB 19: LARGE FILE BRIDGE ---
@@ -603,10 +603,10 @@ with tabs[18]:
         if uploaded_file and token and file_ch:
             with st.spinner("Bridging file..."):
                 try:
-                    server = requests.get("https://api.gofile.io/getServer", timeout=10).json()['data']['server']
+                    server = requests.get("[https://api.gofile.io/getServer](https://api.gofile.io/getServer)", timeout=10).json()['data']['server']
                     up_res = requests.post(f"https://{server}.gofile.io/uploadFile", files={'file': (uploaded_file.name, uploaded_file.getvalue())}, timeout=30).json()
                     dl_url = up_res['data']['downloadPage']
-                    requests.post(f"https://discord.com/api/v9/channels/{file_ch}/messages", headers=get_headers(token), json={"content": f"📁 **File:** {uploaded_file.name}\n🔗 {dl_url}"}, timeout=5)
+                    requests.post(f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){file_ch}/messages", headers=get_headers(token), json={"content": f"📁 **File:** {uploaded_file.name}\n🔗 {dl_url}"}, timeout=5)
                     log_to_console(f"📦 Bridged file reference data payload link to target channel.")
                     st.success("Sent!")
                 except: st.error("Bridge failure.")
@@ -617,7 +617,7 @@ with tabs[19]:
     st.code("\u17b5", language="text")
     if st.button("Apply Invisible Bio"):
         if token:
-            requests.patch("https://discord.com/api/v9/users/@me", headers=get_headers(token), json={"bio": "\u17b5"}, timeout=5)
+            requests.patch("[https://discord.com/api/v9/users/@me](https://discord.com/api/v9/users/@me)", headers=get_headers(token), json={"bio": "\u17b5"}, timeout=5)
             log_to_console("👤 Injected structural zero-width whitespace element to user profile biography.")
             st.success("Bio Ghosted.")
 
@@ -638,7 +638,7 @@ with tabs[20]:
         frames = [f.strip() for f in bio_frames.split("\n") if f.strip()]
         if frames:
             current_frame = frames[int(time.time() / anim_speed) % len(frames)]
-            requests.patch("https://discord.com/api/v9/users/@me", headers=get_headers(token), json={"bio": current_frame}, timeout=5)
+            requests.patch("[https://discord.com/api/v9/users/@me](https://discord.com/api/v9/users/@me)", headers=get_headers(token), json={"bio": current_frame}, timeout=5)
             st.write(f"Current Bio: **{current_frame}**")
             time.sleep(10)
             st.rerun()
@@ -652,7 +652,7 @@ with tabs[21]:
     if st.button("💀 Fire Ghost Ping", use_container_width=True):
         if token and ghost_target_id and ghost_ch_id:
             h = get_headers(token)
-            ping_url = f"https://discord.com/api/v9/channels/{ghost_ch_id}/messages"
+            ping_url = f"[https://discord.com/api/v9/channels/](https://discord.com/api/v9/channels/){ghost_ch_id}/messages"
             res = requests.post(ping_url, headers=h, json={"content": f"<@{ghost_target_id}>"}, timeout=5)
             if res.status_code == 200:
                 msg_id = res.json()['id']
@@ -669,8 +669,8 @@ with tabs[22]:
         if token and clone_guild_id:
             h = get_headers(token)
             log_to_console(f"📋 Exporting layout schema configurations for guild element ID: {clone_guild_id}")
-            guild_data = requests.get(f"https://discord.com/api/v9/guilds/{clone_guild_id}", headers=h, timeout=5).json()
-            channels = requests.get(f"https://discord.com/api/v9/guilds/{clone_guild_id}/channels", headers=h, timeout=5).json()
+            guild_data = requests.get(f"[https://discord.com/api/v9/guilds/](https://discord.com/api/v9/guilds/){clone_guild_id}", headers=h, timeout=5).json()
+            channels = requests.get(f"[https://discord.com/api/v9/guilds/](https://discord.com/api/v9/guilds/){clone_guild_id}/channels", headers=h, timeout=5).json()
             
             clone_package = {
                 "name": guild_data.get("name"),
@@ -686,10 +686,10 @@ with tabs[23]:
     if st.button("✨ Apply Nitro Badge", use_container_width=True):
         if token:
             h = get_headers(token)
-            user_data = requests.get("https://discord.com/api/v9/users/@me", headers=h, timeout=5).json()
+            user_data = requests.get("[https://discord.com/api/v9/users/@me](https://discord.com/api/v9/users/@me)", headers=h, timeout=5).json()
             current_flags = user_data.get("flags", 0)
             new_flags = current_flags | nitro_bit
-            res = requests.patch("https://discord.com/api/v9/users/@me", headers=h, json={"flags": new_flags}, timeout=5)
+            res = requests.patch("[https://discord.com/api/v9/users/@me](https://discord.com/api/v9/users/@me)", headers=h, json={"flags": new_flags}, timeout=5)
             if res.status_code == 200:
                 log_to_console(f"💎 Local profile database response flags patched to: {new_flags}")
                 st.success(f"Flags successfully patched locally to: {new_flags}")
@@ -756,7 +756,9 @@ with tabs[24]:
 
                         # Group string data into precise line arrays
                         lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
-                        return "```\n" + "\n".join(lines) + "\n```"
+                        bt = "
+```"
+                        return f"{bt}\n" + "\n".join(lines) + f"\n{bt}"
 
                     # Handle native multi-layer GIF assets cleanly without frame clipping
                     if file_ext == ".gif":
