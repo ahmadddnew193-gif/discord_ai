@@ -706,10 +706,15 @@ with tabs[24]:
     
     render_style = st.selectbox(
         "Render Style Mapping Profile", 
-        ["Detailed ASCII Text Spectrum", "High-Density Shaded Matrix (█▓▒░ )", "Solid Contrast Blocks (█/ )"]
+        [
+            "Flawless 1:1 Braille Matrix (High Res)", 
+            "Detailed ASCII Text Spectrum", 
+            "High-Density Shaded Matrix (█▓▒░ )", 
+            "Solid Contrast Blocks (█/ )"
+        ]
     )
     
-    char_width = st.slider("Target Width Matrix (Characters)", 15, 45, 28, help="Controls horizontal scaling. Keeping this between 25-32 guarantees frames will fit within standard Discord window boundaries.")
+    char_width = st.slider("Target Width Matrix (Characters)", 15, 60, 32, help="Controls horizontal scaling. Braille supports higher widths (up to 50-60) without wrapping inside Discord!")
 
     if st.button("Run Full Deconstruction & Build Frames", use_container_width=True):
         if not uploaded_media:
@@ -727,41 +732,66 @@ with tabs[24]:
                     file_bytes = uploaded_media.read()
                     file_ext = os.path.splitext(uploaded_media.name)[1].lower()
 
-                    # Precision text mapping array parser
+                    # High-Fidelity 1:1 Vector Engine and Standard Text Multi-Profile Mapping Parser
                     def target_render_frame(pil_img, style, target_w):
                         orig_w, orig_h = pil_img.size
-                        # Precise font aspect multiplier adjustment to counter standard terminal row-stretching
-                        target_h = int((orig_h / orig_w) * target_w * 0.50)
-                        if target_h < 1: 
-                            target_h = 1
+                        
+                        if style == "Flawless 1:1 Braille Matrix (High Res)":
+                            # Proportional height in layout matrix character bounds
+                            char_h = int((orig_h / orig_w) * target_w)
+                            if char_h < 1: char_h = 1
                             
-                        # Standardize color tracking data to gray spectrum mapping arrays
-                        gray_img = pil_img.resize((target_w, target_h)).convert("L")
-                        pixels = list(gray_img.getdata())
-
-                        if style == "Detailed ASCII Text Spectrum":
-                            # Deep contrast density sequence map for rich visual representation
-                            density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
-                            ramp_len = len(density_ramp)
-                            text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels])
-                        elif style == "Solid Contrast Blocks (█/ )":
-                            text_map = "".join(["█" if v < 110 else " " for v in pixels])
+                            # Map sub-pixels (Each character holds an exact 2x4 cell mapping)
+                            pixel_w = target_w * 2
+                            pixel_h = char_h * 4
+                            
+                            gray_img = pil_img.resize((pixel_w, pixel_h)).convert("L")
+                            pixels = gray_img.load()
+                            
+                            lines = []
+                            for y in range(0, pixel_h, 4):
+                                row_chars = []
+                                for x in range(0, pixel_w, 2):
+                                    mask = 0
+                                    # Safe boundary checking against threshold arrays
+                                    if pixels[x, y]     > 127: mask |= 1
+                                    if pixels[x, y+1]   > 127: mask |= 2
+                                    if pixels[x, y+2]   > 127: mask |= 4
+                                    if pixels[x+1, y]   > 127: mask |= 8
+                                    if pixels[x+1, y+1] > 127: mask |= 16
+                                    if pixels[x+1, y+2] > 127: mask |= 32
+                                    if pixels[x, y+3]   > 127: mask |= 64
+                                    if pixels[x+1, y+3] > 127: mask |= 128
+                                    row_chars.append(chr(0x2800 + mask))
+                                lines.append("".join(row_chars))
+                            return "```\n" + "\n".join(lines) + "\n```"
                         else:
-                            # Shaded structural gradient
-                            density_ramp = "█▓▒░ "
-                            ramp_len = len(density_ramp)
-                            text_map = "".join([density_ramp[int(v * (ramp_len - 1) / 255)] for v in pixels])
+                            # Precise font aspect multiplier adjustment to counter row-stretching
+                            target_h = int((orig_h / orig_w) * target_w * 0.50)
+                            if target_h < 1: target_h = 1
+                                
+                            gray_img = pil_img.resize((target_w, target_h)).convert("L")
+                            pixels_list = list(gray_img.getdata())
 
-                        # Group string data into precise line arrays
-                        lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
-                        return "```\n" + "\n".join(lines) + "\n```"
+                            if style == "Detailed ASCII Text Spectrum":
+                                density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
+                                ramp_len = len(density_ramp)
+                                text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels_list])
+                            elif style == "Solid Contrast Blocks (█/ )":
+                                text_map = "".join(["█" if v < 110 else " " for v in pixels_list])
+                            else:
+                                density_ramp = "█▓▒░ "
+                                ramp_len = len(density_ramp)
+                                text_map = "".join([density_ramp[int(v * (ramp_len - 1) / 255)] for v in pixels_list])
+
+                            lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
+                            return "```\n" + "\n".join(lines) + "\n```"
 
                     # Handle native multi-layer GIF assets cleanly without frame clipping
                     if file_ext == ".gif":
                         gif_sequence = Image.open(io.BytesIO(file_bytes))
                         frame_index = 0
                         for frame in ImageSequence.Iterator(gif_sequence):
-                            # Capture every 2nd frame to optimize processing while preserving motion
                             if frame_index % 2 == 0:
                                 converted_layer = target_render_frame(frame.copy(), render_style, char_width)
                                 compiled_frames.append(converted_layer)
@@ -776,9 +806,7 @@ with tabs[24]:
                         frame_count = 0
                         while cap.isOpened():
                             ret, frame_bgr = cap.read()
-                            if not ret:
-                                break
-                            # Keep playback fluid by targeting an optimal framing window rate
+                            if not ret: break
                             if frame_count % 3 == 0:
                                 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                                 pil_frame = Image.fromarray(frame_rgb)
@@ -788,9 +816,8 @@ with tabs[24]:
                         try: os.remove(temp_path)
                         except: pass
 
-                    # Enforce strict safety payload limits for stable transmission
+                    # Enforce strict safety limits for stable transmission
                     if len(compiled_frames) > 45:
-                        # Slice array evenly to optimize performance within technical safety guidelines
                         step = len(compiled_frames) // 40
                         compiled_frames = compiled_frames[::step][:40]
 
@@ -806,7 +833,7 @@ with tabs[24]:
 
     st.markdown("---")
     playback_loops = st.slider("Total Structural Playback Loops", 1, 5, 2)
-    base_delay = st.slider("Safe Frame Delay Interval (Seconds)", 0.8, 3.0, 1.3)
+    base_delay = st.slider("Safe Frame Delay Interval (Seconds)", 0.5, 3.0, 1.1)
 
     if st.button("🚀 Fire Precision 2D Matrix Stream", use_container_width=True):
         if not token:
