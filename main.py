@@ -392,7 +392,7 @@ with tabs[4]:
     emoji_id = st.text_input("Emoji ID").strip().replace("\r","").replace("\n","")
     is_animated = st.checkbox("Is Animated?")
     if st.button("🚀 Send Emoji", use_container_width=True):
-        if token and emoji_id && target_ch:
+        if token and emoji_id and target_ch:
             ext = "gif" if is_animated else "png"
             emoji_url = f"https://cdn.discordapp.com/emojis/{emoji_id}.{ext}?size=48"
             requests.post(f"https://discord.com/api/v9/channels/{target_ch}/messages", headers=get_headers(token), json={"content": emoji_url}, timeout=5)
