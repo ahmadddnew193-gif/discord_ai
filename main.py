@@ -508,7 +508,8 @@ with tabs[13]:
     if st.button("🖌️ Send Colored Text", use_container_width=True):
         if token and channel_id_input:
             code = color_codes[color_choice]
-            ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
+            ansi_payload = f"```ansi\n\u001b[{code}m{color_text}
+```"
             requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload}, timeout=5)
 
 # --- TAB 15: INFINITE TYPING ---
@@ -743,45 +744,67 @@ with tabs[24]:
                                 line_chars = []
                                 for x in range(0, target_w, 2):
                                     bit_offset = 0
-                                    if y < target_h and x < target_w     and pixels[x, y] < 128:     bit_offset |= 1 << 0
-                                    if y+1 < target_h and x < target_w   and pixels[x, y+1] < 128:   bit_offset |= 1 << 1
-                                    if y+2 < target_h and x < target_w   and pixels[x, y+2] < 128:   bit_offset |= 1 << 2
-                                    if y < target_h and x+1 < target_w   and pixels[x+1, y] < 128:   bit_offset |= 1 << 3
-                                    if y+1 < target_h and x+1 < target_w and pixels[x+1, y+1] < 128: bit_offset |= 1 << 4
-                                    if y+2 < target_h and x+1 < target_w and pixels[x+1, y+2] < 128: bit_offset |= 1 << 5
-                                    if y+3 < target_h and x < target_w   and pixels[x, y+3] < 128:   bit_offset |= 1 << 6
-                                    if y+3 < target_h and x+1 < target_w and pixels[x+1, y+3] < 128: bit_offset |= 1 << 7
+                                    if y < target_h and x < target_w     and pixels[x, y] > 127:     bit_offset |= 1 << 0
+                                    if y+1 < target_h and x < target_w   and pixels[x, y+1] > 127:   bit_offset |= 1 << 1
+                                    if y+2 < target_h and x < target_w   and pixels[x, y+2] > 127:   bit_offset |= 1 << 2
+                                    if y < target_h and x+1 < target_w   and pixels[x+1, y] > 127:   bit_offset |= 1 << 3
+                                    if y+1 < target_h and x+1 < target_w and pixels[x+1, y+1] > 127: bit_offset |= 1 << 4
+                                    if y+2 < target_h and x+1 < target_w and pixels[x+1, y+2] > 127: bit_offset |= 1 << 5
+                                    if y+3 < target_h and x < target_w   and pixels[x, y+3] > 127:   bit_offset |= 1 << 6
+                                    if y+3 < target_h and x+1 < target_w and pixels[x+1, y+3] > 127: bit_offset |= 1 << 7
                                     line_chars.append(chr(0x2800 + bit_offset))
                                 output_lines.append("".join(line_chars))
                             return "```\n" + "\n".join(output_lines) + "\n```"
                             
                         elif style == "ANSI Color Blocks (Pixel Art)":
-                            target_h = int((orig_h / orig_w) * target_w * 0.50)
-                            if target_h < 1: target_h = 1
+                            # Using the advanced half-block matrix optimization (2 vertical pixels stacked inside 1 cell grid)
+                            target_h = int((orig_h / orig_w) * target_w * 1.0)
+                            target_h = (target_h // 2) * 2
+                            if target_h < 2: target_h = 2
                             color_img = pil_img.resize((target_w, target_h)).convert("RGB")
                             ansi_lines = []
-                            def get_ansi_code(r, g, b):
-                                brightness = (r + g + b) / 3
-                                if brightness < 45: return "30"
-                                if r > g * 1.2 and r > b * 1.2: return "31"
-                                if g > r * 1.2 and g > b * 1.2: return "32"
-                                if r > 1.1 * b and g > 1.1 * b and abs(r - g) < 50: return "33"
-                                if b > r * 1.2 and b > g * 1.2: return "34"
-                                if r > g * 1.1 and b > g * 1.1: return "35"
-                                if g > r * 1.1 and b > r * 1.1: return "36"
-                                return "37"
-                            for y in range(target_h):
+                            
+                            def get_ansi_color_code(r, g, b, is_background=False):
+                                base = 40 if is_background else 30
+                                ansi_colors = {
+                                    0: (0, 0, 0),       # Black
+                                    1: (170, 0, 0),     # Red
+                                    2: (0, 170, 0),     # Green
+                                    3: (170, 170, 0),   # Yellow
+                                    4: (0, 0, 170),     # Blue
+                                    5: (170, 0, 170),   # Magenta
+                                    6: (0, 170, 170),   # Cyan
+                                    7: (255, 255, 255)  # White
+                                }
+                                best_match = 0
+                                min_dist = float('inf')
+                                for code, rgb in ansi_colors.items():
+                                    dist = (r - rgb[0])**2 + (g - rgb[1])**2 + (b - rgb[2])**2
+                                    if dist < min_dist:
+                                        min_dist = dist
+                                        best_match = code
+                                return str(base + best_match)
+                                
+                            for y in range(0, target_h, 2):
                                 line_buffer = []
-                                active_color = None
+                                last_bg, last_fg = None, None
                                 for x in range(target_w):
-                                    r, g, b = color_img.getpixel((x, y))
-                                    color_code = get_ansi_code(r, g, b)
-                                    if color_code != active_color:
-                                        line_buffer.append(f"\u001b[0;{color_code}m")
-                                        active_color = color_code
-                                    line_buffer.append("█")
+                                    r1, g1, b1 = color_img.getpixel((x, y))
+                                    if y + 1 < target_h:
+                                        r2, g2, b2 = color_img.getpixel((x, y + 1))
+                                    else:
+                                        r2, g2, b2 = 0, 0, 0
+                                    
+                                    bg_code = get_ansi_color_code(r1, g1, b1, is_background=True)
+                                    fg_code = get_ansi_color_code(r2, g2, b2, is_background=False)
+                                    
+                                    if bg_code != last_bg or fg_code != last_fg:
+                                        line_buffer.append(f"\u001b[0;{fg_code};{bg_code}m")
+                                        last_bg, last_fg = bg_code, fg_code
+                                    line_buffer.append("▄")
                                 ansi_lines.append("".join(line_buffer))
-                            return "```ansi\n" + "\n".join(ansi_lines) + "\n```"
+                            return "```ansi\n" + "\n".join(ansi_lines) + "\n
+```"
                             
                         else:
                             # Precise font aspect multiplier adjustment to counter standard terminal row-stretching
@@ -810,43 +833,34 @@ with tabs[24]:
                             lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
                             return "```\n" + "\n".join(lines) + "\n```"
 
-                    # Handle native multi-layer GIF assets cleanly without frame clipping
+                    # PROCESS EVERY FRAME FOR NATIVE GIF ASSETS
                     if file_ext == ".gif":
                         gif_sequence = Image.open(io.BytesIO(file_bytes))
-                        frame_index = 0
                         for frame in ImageSequence.Iterator(gif_sequence):
-                            # Capture every 2nd frame to optimize processing while preserving motion
-                            if frame_index % 2 == 0:
-                                converted_layer = target_render_frame(frame.copy(), render_style, char_width)
-                                compiled_frames.append(converted_layer)
-                            frame_index += 1
+                            converted_layer = target_render_frame(frame.copy(), render_style, char_width)
+                            compiled_frames.append(converted_layer)
                     else:
-                        # Process video files
+                        # PROCESS EVERY FRAME FOR VIDEO FILE PAYLOADS
                         with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_video:
                             temp_video.write(file_bytes)
                             temp_path = temp_video.name
 
                         cap = cv2.VideoCapture(temp_path)
-                        frame_count = 0
                         while cap.isOpened():
                             ret, frame_bgr = cap.read()
                             if not ret:
                                 break
-                            # Keep playback fluid by targeting an optimal framing window rate
-                            if frame_count % 3 == 0:
-                                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                                pil_frame = Image.fromarray(frame_rgb)
-                                compiled_frames.append(target_render_frame(pil_frame, render_style, char_width))
-                            frame_count += 1
+                            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                            pil_frame = Image.fromarray(frame_rgb)
+                            compiled_frames.append(target_render_frame(pil_frame, render_style, char_width))
                         cap.release()
                         try: os.remove(temp_path)
                         except: pass
 
-                    # Enforce strict safety payload limits for stable transmission
-                    if len(compiled_frames) > 45:
-                        # Slice array evenly to optimize performance within technical safety guidelines
-                        step = len(compiled_frames) // 40
-                        compiled_frames = compiled_frames[::step][:40]
+                    # Enforce stable structural play limits to prevent connection blockages
+                    if len(compiled_frames) > 85:
+                        step = len(compiled_frames) // 80
+                        compiled_frames = compiled_frames[::step][:80]
 
                     if compiled_frames:
                         st.session_state.converted_media_frames = compiled_frames
@@ -896,14 +910,13 @@ with tabs[24]:
                                     transaction_complete = True
                                     time.sleep(base_delay)
                                 elif patch_res.status_code == 429:
-                                    # Dynamically capture Discord's exact cooldown requirements
                                     rate_limit_data = patch_res.json()
                                     backoff_timer = float(rate_limit_data.get("retry_after", 1.5))
                                     monitor.warning(f"⏳ Rate Limit Triggered. Cool-down active: `{backoff_timer}s`...")
                                     time.sleep(backoff_timer + 0.1)
                                 else:
                                     monitor.error(f"❌ Connection pipeline failure code: {patch_res.status_code}")
-                                    transaction_complete = True # Force breakthrough on fatal channel blocks
+                                    transaction_complete = True
                     
                     monitor.success("✨ Sequence array streaming successfully finalized!")
                     log_to_console("✨ 2D Matrix Engine operation wrapped up safely.")
