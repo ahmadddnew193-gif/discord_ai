@@ -706,7 +706,7 @@ with tabs[24]:
     
     render_style = st.selectbox(
         "Render Style Mapping Profile", 
-        ["Detailed ASCII Text Spectrum", "High-Density Shaded Matrix (█▓▒░ )", "Solid Contrast Blocks (█/ )"]
+        ["Braille Bit-Matrix (High-Res Lines)", "ANSI Color Blocks (Pixel Art)", "Detailed ASCII Text Spectrum", "High-Density Shaded Matrix (█▓▒░ )", "Solid Contrast Blocks (█/ )"]
     )
     
     char_width = st.slider("Target Width Matrix (Characters)", 15, 45, 28, help="Controls horizontal scaling. Keeping this between 25-32 guarantees frames will fit within standard Discord window boundaries.")
@@ -730,31 +730,85 @@ with tabs[24]:
                     # Precision text mapping array parser
                     def target_render_frame(pil_img, style, target_w):
                         orig_w, orig_h = pil_img.size
-                        # Precise font aspect multiplier adjustment to counter standard terminal row-stretching
-                        target_h = int((orig_h / orig_w) * target_w * 0.50)
-                        if target_h < 1: 
-                            target_h = 1
+                        
+                        if style == "Braille Bit-Matrix (High-Res Lines)":
+                            target_w = (target_w // 2) * 2
+                            target_h = int((orig_h / orig_w) * target_w * 0.77)
+                            target_h = (target_h // 4) * 4
+                            if target_h < 4: target_h = 4
+                            gray_img = pil_img.resize((target_w, target_h)).convert("L")
+                            pixels = gray_img.load()
+                            output_lines = []
+                            for y in range(0, target_h, 4):
+                                line_chars = []
+                                for x in range(0, target_w, 2):
+                                    bit_offset = 0
+                                    if y < target_h and x < target_w     and pixels[x, y] < 128:     bit_offset |= 1 << 0
+                                    if y+1 < target_h and x < target_w   and pixels[x, y+1] < 128:   bit_offset |= 1 << 1
+                                    if y+2 < target_h and x < target_w   and pixels[x, y+2] < 128:   bit_offset |= 1 << 2
+                                    if y < target_h and x+1 < target_w   and pixels[x+1, y] < 128:   bit_offset |= 1 << 3
+                                    if y+1 < target_h and x+1 < target_w and pixels[x+1, y+1] < 128: bit_offset |= 1 << 4
+                                    if y+2 < target_h and x+1 < target_w and pixels[x+1, y+2] < 128: bit_offset |= 1 << 5
+                                    if y+3 < target_h and x < target_w   and pixels[x, y+3] < 128:   bit_offset |= 1 << 6
+                                    if y+3 < target_h and x+1 < target_w and pixels[x+1, y+3] < 128: bit_offset |= 1 << 7
+                                    line_chars.append(chr(0x2800 + bit_offset))
+                                output_lines.append("".join(line_chars))
+                            return "```\n" + "\n".join(output_lines) + "\n```"
                             
-                        # Standardize color tracking data to gray spectrum mapping arrays
-                        gray_img = pil_img.resize((target_w, target_h)).convert("L")
-                        pixels = list(gray_img.getdata())
-
-                        if style == "Detailed ASCII Text Spectrum":
-                            # Deep contrast density sequence map for rich visual representation
-                            density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
-                            ramp_len = len(density_ramp)
-                            text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels])
-                        elif style == "Solid Contrast Blocks (█/ )":
-                            text_map = "".join(["█" if v < 110 else " " for v in pixels])
+                        elif style == "ANSI Color Blocks (Pixel Art)":
+                            target_h = int((orig_h / orig_w) * target_w * 0.50)
+                            if target_h < 1: target_h = 1
+                            color_img = pil_img.resize((target_w, target_h)).convert("RGB")
+                            ansi_lines = []
+                            def get_ansi_code(r, g, b):
+                                brightness = (r + g + b) / 3
+                                if brightness < 45: return "30"
+                                if r > g * 1.2 and r > b * 1.2: return "31"
+                                if g > r * 1.2 and g > b * 1.2: return "32"
+                                if r > 1.1 * b and g > 1.1 * b and abs(r - g) < 50: return "33"
+                                if b > r * 1.2 and b > g * 1.2: return "34"
+                                if r > g * 1.1 and b > g * 1.1: return "35"
+                                if g > r * 1.1 and b > r * 1.1: return "36"
+                                return "37"
+                            for y in range(target_h):
+                                line_buffer = []
+                                active_color = None
+                                for x in range(target_w):
+                                    r, g, b = color_img.getpixel((x, y))
+                                    color_code = get_ansi_code(r, g, b)
+                                    if color_code != active_color:
+                                        line_buffer.append(f"\u001b[0;{color_code}m")
+                                        active_color = color_code
+                                    line_buffer.append("█")
+                                ansi_lines.append("".join(line_buffer))
+                            return "```ansi\n" + "\n".join(ansi_lines) + "\n```"
+                            
                         else:
-                            # Shaded structural gradient
-                            density_ramp = "█▓▒░ "
-                            ramp_len = len(density_ramp)
-                            text_map = "".join([density_ramp[int(v * (ramp_len - 1) / 255)] for v in pixels])
+                            # Precise font aspect multiplier adjustment to counter standard terminal row-stretching
+                            target_h = int((orig_h / orig_w) * target_w * 0.50)
+                            if target_h < 1: 
+                                target_h = 1
+                                
+                            # Standardize color tracking data to gray spectrum mapping arrays
+                            gray_img = pil_img.resize((target_w, target_h)).convert("L")
+                            pixels = list(gray_img.getdata())
 
-                        # Group string data into precise line arrays
-                        lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
-                        return "```\n" + "\n".join(lines) + "\n```"
+                            if style == "Detailed ASCII Text Spectrum":
+                                # Deep contrast density sequence map for rich visual representation
+                                density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
+                                ramp_len = len(density_ramp)
+                                text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels])
+                            elif style == "Solid Contrast Blocks (█/ )":
+                                text_map = "".join(["█" if v < 110 else " " for v in pixels])
+                            else:
+                                # Shaded structural gradient
+                                density_ramp = "█▓▒░ "
+                                ramp_len = len(density_ramp)
+                                text_map = "".join([density_ramp[int(v * (ramp_len - 1) / 255)] for v in pixels])
+
+                            # Group string data into precise line arrays
+                            lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
+                            return "```\n" + "\n".join(lines) + "\n```"
 
                     # Handle native multi-layer GIF assets cleanly without frame clipping
                     if file_ext == ".gif":
