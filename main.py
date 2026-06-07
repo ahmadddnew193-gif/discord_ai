@@ -696,21 +696,30 @@ with tabs[23]:
 
 # --- TAB 25: 2D ANIMATOR ---
 with tabs[24]:
-    st.header("🎬 2D Animator")
+    st.header("🎬 2D Animator (Advanced Multi-Profile Engine)")
     
     anim_ch_raw = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     anim_ch = anim_ch_raw.strip().replace("\r", "").replace("\n", "") if anim_ch_raw else ""
     
     uploaded_media = st.file_uploader("Upload Target Animation Asset (GIF, MP4, MOV)", type=["gif", "mp4", "mov", "avi"])
     
-    # Single frame limit slider as requested
+    render_style = st.selectbox(
+        "Render Style Mapping Profile", 
+        [
+            "Flawless 1:1 Braille Matrix (High Res)", 
+            "Ultra-Sharp Block Pixel Art (▄▀█)",
+            "External API Cloud-Generated ASCII"
+        ]
+    )
+    
+    char_width = st.slider("Target Width Matrix (Characters)", 15, 60, 32)
     max_frames = st.slider("Max Frames Limit", min_value=5, max_value=100, value=40)
 
     if st.button("Run Full Deconstruction & Build Frames", use_container_width=True):
         if not uploaded_media:
             st.error("Please supply a valid media asset payload before initiating compilation.")
         else:
-            with st.spinner("Extracting frames..."):
+            with st.spinner("Extracting frames and processing matrices..."):
                 try:
                     from PIL import Image, ImageSequence
                     import io
@@ -722,27 +731,92 @@ with tabs[24]:
                     file_bytes = uploaded_media.read()
                     file_ext = os.path.splitext(uploaded_media.name)[1].lower()
 
-                    def target_render_frame(pil_img, target_w=28):
+                    def target_render_frame(pil_img, style, target_w):
                         orig_w, orig_h = pil_img.size
-                        target_h = int((orig_h / orig_w) * target_w * 0.50)
-                        if target_h < 1: 
-                            target_h = 1
-                        gray_img = pil_img.resize((target_w, target_h)).convert("L")
-                        pixels = list(gray_img.getdata())
-
-                        density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
-                        ramp_len = len(density_ramp)
-                        text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels])
-
-                        lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
-                        return "```\n" + "\n".join(lines) + "\n```"
+                        
+                        # --- PROFILE 1: BRAILLE MATRIX ---
+                        if style == "Flawless 1:1 Braille Matrix (High Res)":
+                            char_h = int((orig_h / orig_w) * target_w)
+                            if char_h < 1: char_h = 1
+                            pixel_w = target_w * 2
+                            pixel_h = char_h * 4
+                            
+                            gray_img = pil_img.resize((pixel_w, pixel_h)).convert("L")
+                            pixels = gray_img.load()
+                            
+                            lines = []
+                            for y in range(0, pixel_h, 4):
+                                row_chars = []
+                                for x in range(0, pixel_w, 2):
+                                    mask = 0
+                                    if pixels[x, y]     > 127: mask |= 1
+                                    if pixels[x, y+1]   > 127: mask |= 2
+                                    if pixels[x, y+2]   > 127: mask |= 4
+                                    if pixels[x+1, y]   > 127: mask |= 8
+                                    if pixels[x+1, y+1] > 127: mask |= 16
+                                    if pixels[x+1, y+2] > 127: mask |= 32
+                                    if pixels[x, y+3]   > 127: mask |= 64
+                                    if pixels[x+1, y+3] > 127: mask |= 128
+                                    row_chars.append(chr(0x2800 + mask))
+                                lines.append("".join(row_chars))
+                            return "```\n" + "\n".join(lines) + "\n```"
+                        
+                        # --- PROFILE 2: ULTRA-SHARP BLOCK PIXEL ART ---
+                        elif style == "Ultra-Sharp Block Pixel Art (▄▀█)":
+                            char_h = int((orig_h / orig_w) * target_w)
+                            if char_h < 1: char_h = 1
+                            pixel_w = target_w
+                            pixel_h = char_h * 2
+                            
+                            gray_img = pil_img.resize((pixel_w, pixel_h)).convert("L")
+                            pixels = gray_img.load()
+                            
+                            lines = []
+                            for y in range(0, pixel_h, 2):
+                                row_chars = []
+                                for x in range(0, pixel_w):
+                                    top_pixel = pixels[x, y] > 127
+                                    bottom_pixel = pixels[x, y+1] > 127
+                                    if top_pixel and bottom_pixel: row_chars.append("█")
+                                    elif top_pixel: row_chars.append("▀")
+                                    elif bottom_pixel: row_chars.append("▄")
+                                    else: row_chars.append(" ")
+                                lines.append("".join(row_chars))
+                            return "```\n" + "\n".join(lines) + "\n```"
+                            
+                        # --- PROFILE 3: EXTERNAL CLOUD API ART GENERATOR ---
+                        else:
+                            try:
+                                buffer = io.BytesIO()
+                                pil_img.save(buffer, format="JPEG")
+                                img_bytes = buffer.getvalue()
+                                # Using a high-performance, stable image-to-text ascii microservice engine
+                                api_res = requests.post(
+                                    f"https://asciiart.club/api/convert?width={target_w}", 
+                                    files={"file": ("frame.jpg", img_bytes, "image/jpeg")},
+                                    timeout=6
+                                )
+                                if api_res.status_code == 200 and api_res.text.strip():
+                                    return f"```\n{api_res.text.strip()}\n```"
+                            except: pass
+                            
+                            # Fallback layout algorithm if API drops out temporarily
+                            target_h = int((orig_h / orig_w) * target_w * 0.50)
+                            if target_h < 1: target_h = 1
+                            gray_img = pil_img.resize((target_w, target_h)).convert("L")
+                            pixels_list = list(gray_img.getdata())
+                            density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
+                            ramp_len = len(density_ramp)
+                            text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels_list])
+                            lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
+                            return "```\n" + "\n".join(lines) + "\n```"
 
                     if file_ext == ".gif":
                         gif_sequence = Image.open(io.BytesIO(file_bytes))
                         frame_index = 0
                         for frame in ImageSequence.Iterator(gif_sequence):
                             if frame_index % 2 == 0:
-                                compiled_frames.append(target_render_frame(frame.copy()))
+                                compiled_frames.append(target_render_frame(frame.copy(), render_style, char_width))
                             frame_index += 1
                     else:
                         with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_video:
@@ -753,12 +827,11 @@ with tabs[24]:
                         frame_count = 0
                         while cap.isOpened():
                             ret, frame_bgr = cap.read()
-                            if not ret:
-                                break
+                            if not ret: break
                             if frame_count % 3 == 0:
                                 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                                 pil_frame = Image.fromarray(frame_rgb)
-                                compiled_frames.append(target_render_frame(pil_frame))
+                                compiled_frames.append(target_render_frame(pil_frame, render_style, char_width))
                             frame_count += 1
                         cap.release()
                         try: os.remove(temp_path)
