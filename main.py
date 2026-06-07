@@ -694,118 +694,57 @@ with tabs[23]:
             else:
                 st.error(f"Failed to patch structural status: {res.status_code}")
 
-# --- TAB 25: 2D ANIMATOR (ROBUST PIPELINE MATRIX ENGINE) ---
+# --- TAB 25: 2D ANIMATOR ---
 with tabs[24]:
-    st.header("🎬 Advanced 2D Media Vector Engine")
-    st.info("Converts video or GIF media files into highly accurate text sequences optimized for Discord Markdown windows without breaking layouts.")
+    st.header("🎬 2D Animator")
     
     anim_ch_raw = st.text_input("Target Channel ID", value=channel_id_input, key="anim_ch_id")
     anim_ch = anim_ch_raw.strip().replace("\r", "").replace("\n", "") if anim_ch_raw else ""
     
     uploaded_media = st.file_uploader("Upload Target Animation Asset (GIF, MP4, MOV)", type=["gif", "mp4", "mov", "avi"])
     
-    render_style = st.selectbox(
-        "Render Style Mapping Profile", 
-        [
-            "Detailed ASCII Text Spectrum", 
-            "High-Density Shaded Matrix (█▓▒░ )", 
-            "Solid Contrast Blocks (█/ )",
-            "Cyberpunk Binary (1/0)",
-            "Edge Detection Outlines (OpenCV Canny)"
-        ]
-    )
-    
-    col_w, col_s = st.columns(2)
-    with col_w:
-        char_width = st.slider("Target Width Matrix (Characters)", 15, 45, 28, help="Controls horizontal scaling. Keeping this between 25-32 guarantees frames will fit within standard Discord window boundaries.")
-        font_aspect = st.slider("Font Aspect Ratio Correction", 0.3, 1.0, 0.50, step=0.05, help="Compensates for tall terminal/Discord fonts. Tweak this if frames look squished or stretched.")
-    with col_s:
-        frame_step = st.slider("Frame Sampling Step Rate", 1, 30, 2, help="Extract 1 frame every N frames. 1 = every frame, 2 = every 2nd frame, etc.")
-        max_frames_cap = st.slider("Maximum Total Frames Cap", 5, 100, 40, help="Slices down long videos safely to avoid huge Discord limits.")
-
-    st.markdown("##### 🎛️ Image Pre-Processing Enhancements")
-    col_b, col_c = st.columns(2)
-    with col_b:
-        brightness_val = st.slider("Brightness Correction Boost", -100, 100, 0)
-    with col_c:
-        contrast_val = st.slider("Contrast Enhancement Factor", 0.5, 3.0, 1.0, step=0.1)
+    # Single frame limit slider as requested
+    max_frames = st.slider("Max Frames Limit", min_value=5, max_value=100, value=40)
 
     if st.button("Run Full Deconstruction & Build Frames", use_container_width=True):
         if not uploaded_media:
             st.error("Please supply a valid media asset payload before initiating compilation.")
         else:
-            with st.spinner("Extracting complete structural frame trees and applying density maps..."):
+            with st.spinner("Extracting frames..."):
                 try:
-                    from PIL import Image, ImageSequence, ImageEnhance
+                    from PIL import Image, ImageSequence
                     import io
                     import cv2
                     import tempfile
-                    import numpy as np
 
                     st.session_state.converted_media_frames = []
                     compiled_frames = []
                     file_bytes = uploaded_media.read()
                     file_ext = os.path.splitext(uploaded_media.name)[1].lower()
 
-                    # Precision text mapping array parser with pre-processing matrix parameters
-                    def target_render_frame(pil_img, style, target_w, b_factor, c_factor, aspect):
-                        # Apply live contrast modifications
-                        if c_factor != 1.0:
-                            pil_img = ImageEnhance.Contrast(pil_img).enhance(c_factor)
-                        # Apply live brightness modifications
-                        if b_factor != 0:
-                            pil_img = ImageEnhance.Brightness(pil_img).enhance(1.0 + (b_factor / 100.0))
-
+                    def target_render_frame(pil_img, target_w=28):
                         orig_w, orig_h = pil_img.size
-                        # Custom adjustable aspect ratio correction calculations
-                        target_h = int((orig_h / orig_w) * target_w * aspect)
+                        target_h = int((orig_h / orig_w) * target_w * 0.50)
                         if target_h < 1: 
                             target_h = 1
-                            
-                        # --- METHOD 1: OPENCV CANNY CONTOUR EDGE DETECTION MAP ---
-                        if style == "Edge Detection Outlines (OpenCV Canny)":
-                            open_cv_image = np.array(pil_img.convert("L").resize((target_w, target_h)))
-                            edges = cv2.Canny(open_cv_image, 100, 200)
-                            lines = []
-                            for row in edges:
-                                line_chars = ["#" if pixel > 0 else " " for pixel in row]
-                                lines.append("".join(line_chars))
-                            return "```\n" + "\n".join(lines) + "\n```"
-
-                        # Standardize color tracking data to gray spectrum mapping arrays
                         gray_img = pil_img.resize((target_w, target_h)).convert("L")
                         pixels = list(gray_img.getdata())
 
-                        if style == "Detailed ASCII Text Spectrum":
-                            # Deep contrast density sequence map for rich visual representation
-                            density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
-                            ramp_len = len(density_ramp)
-                            text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels])
-                        elif style == "Solid Contrast Blocks (█/ )":
-                            text_map = "".join(["█" if v < 110 else " " for v in pixels])
-                        elif style == "Cyberpunk Binary (1/0)":
-                            text_map = "".join(["1" if v < 128 else "0" for v in pixels])
-                        else:
-                            # Shaded structural gradient
-                            density_ramp = "█▓▒░ "
-                            ramp_len = len(density_ramp)
-                            text_map = "".join([density_ramp[int(v * (ramp_len - 1) / 255)] for v in pixels])
+                        density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
+                        ramp_len = len(density_ramp)
+                        text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels])
 
-                        # Group string data into precise line arrays
                         lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
                         return "```\n" + "\n".join(lines) + "\n```"
 
-                    # Handle native multi-layer GIF assets cleanly using the custom dynamic step rates
                     if file_ext == ".gif":
                         gif_sequence = Image.open(io.BytesIO(file_bytes))
                         frame_index = 0
                         for frame in ImageSequence.Iterator(gif_sequence):
-                            if frame_index % frame_step == 0:
-                                converted_layer = target_render_frame(frame.copy(), render_style, char_width, brightness_val, contrast_val, font_aspect)
-                                compiled_frames.append(converted_layer)
+                            if frame_index % 2 == 0:
+                                compiled_frames.append(target_render_frame(frame.copy()))
                             frame_index += 1
                     else:
-                        # Process video files using the custom dynamic step rates
                         with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_video:
                             temp_video.write(file_bytes)
                             temp_path = temp_video.name
@@ -816,24 +755,23 @@ with tabs[24]:
                             ret, frame_bgr = cap.read()
                             if not ret:
                                 break
-                            if frame_count % frame_step == 0:
+                            if frame_count % 3 == 0:
                                 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                                 pil_frame = Image.fromarray(frame_rgb)
-                                compiled_frames.append(target_render_frame(pil_frame, render_style, char_width, brightness_val, contrast_val, font_aspect))
+                                compiled_frames.append(target_render_frame(pil_frame))
                             frame_count += 1
                         cap.release()
                         try: os.remove(temp_path)
                         except: pass
 
-                    # Enforce custom slider frame cap parameters 
-                    if len(compiled_frames) > max_frames_cap:
-                        step = len(compiled_frames) // max_frames_cap
-                        compiled_frames = compiled_frames[::step][:max_frames_cap]
+                    if len(compiled_frames) > max_frames:
+                        step = max(1, len(compiled_frames) // max_frames)
+                        compiled_frames = compiled_frames[::step][:max_frames]
 
                     if compiled_frames:
                         st.session_state.converted_media_frames = compiled_frames
                         st.success(f"Successfully processed {len(compiled_frames)} optimized frames!")
-                        log_to_console(f"🎬 Vector Core: Deconstructed asset successfully into text matrices.")
+                        log_to_console("🎬 Deconstructed asset successfully into text matrices.")
                     else:
                         st.error("Could not extract frame data trees from asset file.")
                 except Exception as err:
@@ -841,10 +779,8 @@ with tabs[24]:
                     log_to_console(f"❌ Structural failure during processing: {str(err)}")
 
     st.markdown("---")
-    playback_loops = st.slider("Total Structural Playback Loops", 1, 5, 2)
-    base_delay = st.slider("Safe Frame Delay Interval (Seconds)", 0.8, 3.0, 1.3)
 
-    if st.button("🚀 Fire Precision 2D Matrix Stream", use_container_width=True):
+    if st.button("Fire 2D Anim", use_container_width=True):
         if not token:
             st.error("Authentication token missing.")
         elif not anim_ch:
@@ -865,27 +801,22 @@ with tabs[24]:
                     deployed_msg_id = init_post.json()["id"]
                     patch_target_url = f"{base_url}/{deployed_msg_id}"
                     
-                    for current_loop in range(playback_loops):
-                        for idx, frame_payload in enumerate(frames_to_send):
-                            monitor.markdown(f"**Streaming Frames:** Loop `{current_loop + 1}/{playback_loops}` | Executing Index `{idx + 1}/{len(frames_to_send)}`")
+                    for idx, frame_payload in enumerate(frames_to_send):
+                        monitor.markdown(f"**Streaming Frames:** Executing Index `{idx + 1}/{len(frames_to_send)}`")
+                        
+                        transaction_complete = False
+                        while not transaction_complete:
+                            patch_res = requests.patch(patch_target_url, headers=h_vars, json={"content": frame_payload}, timeout=10)
                             
-                            # --- STABLE FORCE-FRAME RETRY LOOP WITH DYNAMIC BACKOFF ---
-                            transaction_complete = False
-                            while not transaction_complete:
-                                patch_res = requests.patch(patch_target_url, headers=h_vars, json={"content": frame_payload}, timeout=10)
-                                
-                                if patch_res.status_code == 200:
-                                    transaction_complete = True
-                                    time.sleep(base_delay)
-                                elif patch_res.status_code == 429:
-                                    # Dynamically capture Discord's exact cooldown requirements
-                                    rate_limit_data = patch_res.json()
-                                    backoff_timer = float(rate_limit_data.get("retry_after", 1.5))
-                                    monitor.warning(f"⏳ Rate Limit Triggered. Cool-down active: `{backoff_timer}s`...")
-                                    time.sleep(backoff_timer + 0.1)
-                                else:
-                                    monitor.error(f"❌ Connection pipeline failure code: {patch_res.status_code}")
-                                    transaction_complete = True # Force breakthrough on fatal channel blocks
+                            if patch_res.status_code == 200:
+                                transaction_complete = True
+                                time.sleep(1.0)
+                            elif patch_res.status_code == 429:
+                                rate_limit_data = patch_res.json()
+                                backoff_timer = float(rate_limit_data.get("retry_after", 1.5))
+                                time.sleep(backoff_timer + 0.1)
+                            else:
+                                transaction_complete = True
                     
                     monitor.success("✨ Sequence array streaming successfully finalized!")
                     log_to_console("✨ 2D Matrix Engine operation wrapped up safely.")
