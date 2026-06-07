@@ -508,8 +508,7 @@ with tabs[13]:
     if st.button("🖌️ Send Colored Text", use_container_width=True):
         if token and channel_id_input:
             code = color_codes[color_choice]
-            ansi_payload = f"```ansi\n\u001b[{code}m{color_text}
-```"
+            ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
             requests.post(f"https://discord.com/api/v9/channels/{channel_id_input}/messages", headers=get_headers(token), json={"content": ansi_payload}, timeout=5)
 
 # --- TAB 15: INFINITE TYPING ---
@@ -707,7 +706,7 @@ with tabs[24]:
     
     render_style = st.selectbox(
         "Render Style Mapping Profile", 
-        ["Braille Bit-Matrix (High-Res Lines)", "ANSI Color Blocks (Pixel Art)", "Detailed ASCII Text Spectrum", "High-Density Shaded Matrix (█▓▒░ )", "Solid Contrast Blocks (█/ )"]
+        ["Detailed ASCII Text Spectrum", "High-Density Shaded Matrix (█▓▒░ )", "Solid Contrast Blocks (█/ )"]
     )
     
     char_width = st.slider("Target Width Matrix (Characters)", 15, 45, 28, help="Controls horizontal scaling. Keeping this between 25-32 guarantees frames will fit within standard Discord window boundaries.")
@@ -731,136 +730,69 @@ with tabs[24]:
                     # Precision text mapping array parser
                     def target_render_frame(pil_img, style, target_w):
                         orig_w, orig_h = pil_img.size
-                        
-                        if style == "Braille Bit-Matrix (High-Res Lines)":
-                            target_w = (target_w // 2) * 2
-                            target_h = int((orig_h / orig_w) * target_w * 0.77)
-                            target_h = (target_h // 4) * 4
-                            if target_h < 4: target_h = 4
-                            gray_img = pil_img.resize((target_w, target_h)).convert("L")
-                            pixels = gray_img.load()
-                            output_lines = []
-                            for y in range(0, target_h, 4):
-                                line_chars = []
-                                for x in range(0, target_w, 2):
-                                    bit_offset = 0
-                                    if y < target_h and x < target_w     and pixels[x, y] > 127:     bit_offset |= 1 << 0
-                                    if y+1 < target_h and x < target_w   and pixels[x, y+1] > 127:   bit_offset |= 1 << 1
-                                    if y+2 < target_h and x < target_w   and pixels[x, y+2] > 127:   bit_offset |= 1 << 2
-                                    if y < target_h and x+1 < target_w   and pixels[x+1, y] > 127:   bit_offset |= 1 << 3
-                                    if y+1 < target_h and x+1 < target_w and pixels[x+1, y+1] > 127: bit_offset |= 1 << 4
-                                    if y+2 < target_h and x+1 < target_w and pixels[x+1, y+2] > 127: bit_offset |= 1 << 5
-                                    if y+3 < target_h and x < target_w   and pixels[x, y+3] > 127:   bit_offset |= 1 << 6
-                                    if y+3 < target_h and x+1 < target_w and pixels[x+1, y+3] > 127: bit_offset |= 1 << 7
-                                    line_chars.append(chr(0x2800 + bit_offset))
-                                output_lines.append("".join(line_chars))
-                            return "```\n" + "\n".join(output_lines) + "\n```"
+                        # Precise font aspect multiplier adjustment to counter standard terminal row-stretching
+                        target_h = int((orig_h / orig_w) * target_w * 0.50)
+                        if target_h < 1: 
+                            target_h = 1
                             
-                        elif style == "ANSI Color Blocks (Pixel Art)":
-                            # Using the advanced half-block matrix optimization (2 vertical pixels stacked inside 1 cell grid)
-                            target_h = int((orig_h / orig_w) * target_w * 1.0)
-                            target_h = (target_h // 2) * 2
-                            if target_h < 2: target_h = 2
-                            color_img = pil_img.resize((target_w, target_h)).convert("RGB")
-                            ansi_lines = []
-                            
-                            def get_ansi_color_code(r, g, b, is_background=False):
-                                base = 40 if is_background else 30
-                                ansi_colors = {
-                                    0: (0, 0, 0),       # Black
-                                    1: (170, 0, 0),     # Red
-                                    2: (0, 170, 0),     # Green
-                                    3: (170, 170, 0),   # Yellow
-                                    4: (0, 0, 170),     # Blue
-                                    5: (170, 0, 170),   # Magenta
-                                    6: (0, 170, 170),   # Cyan
-                                    7: (255, 255, 255)  # White
-                                }
-                                best_match = 0
-                                min_dist = float('inf')
-                                for code, rgb in ansi_colors.items():
-                                    dist = (r - rgb[0])**2 + (g - rgb[1])**2 + (b - rgb[2])**2
-                                    if dist < min_dist:
-                                        min_dist = dist
-                                        best_match = code
-                                return str(base + best_match)
-                                
-                            for y in range(0, target_h, 2):
-                                line_buffer = []
-                                last_bg, last_fg = None, None
-                                for x in range(target_w):
-                                    r1, g1, b1 = color_img.getpixel((x, y))
-                                    if y + 1 < target_h:
-                                        r2, g2, b2 = color_img.getpixel((x, y + 1))
-                                    else:
-                                        r2, g2, b2 = 0, 0, 0
-                                    
-                                    bg_code = get_ansi_color_code(r1, g1, b1, is_background=True)
-                                    fg_code = get_ansi_color_code(r2, g2, b2, is_background=False)
-                                    
-                                    if bg_code != last_bg or fg_code != last_fg:
-                                        line_buffer.append(f"\u001b[0;{fg_code};{bg_code}m")
-                                        last_bg, last_fg = bg_code, fg_code
-                                    line_buffer.append("▄")
-                                ansi_lines.append("".join(line_buffer))
-                            return "```ansi\n" + "\n".join(ansi_lines) + "\n
-```"
-                            
+                        # Standardize color tracking data to gray spectrum mapping arrays
+                        gray_img = pil_img.resize((target_w, target_h)).convert("L")
+                        pixels = list(gray_img.getdata())
+
+                        if style == "Detailed ASCII Text Spectrum":
+                            # Deep contrast density sequence map for rich visual representation
+                            density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
+                            ramp_len = len(density_ramp)
+                            text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels])
+                        elif style == "Solid Contrast Blocks (█/ )":
+                            text_map = "".join(["█" if v < 110 else " " for v in pixels])
                         else:
-                            # Precise font aspect multiplier adjustment to counter standard terminal row-stretching
-                            target_h = int((orig_h / orig_w) * target_w * 0.50)
-                            if target_h < 1: 
-                                target_h = 1
-                                
-                            # Standardize color tracking data to gray spectrum mapping arrays
-                            gray_img = pil_img.resize((target_w, target_h)).convert("L")
-                            pixels = list(gray_img.getdata())
+                            # Shaded structural gradient
+                            density_ramp = "█▓▒░ "
+                            ramp_len = len(density_ramp)
+                            text_map = "".join([density_ramp[int(v * (ramp_len - 1) / 255)] for v in pixels])
 
-                            if style == "Detailed ASCII Text Spectrum":
-                                # Deep contrast density sequence map for rich visual representation
-                                density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
-                                ramp_len = len(density_ramp)
-                                text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels])
-                            elif style == "Solid Contrast Blocks (█/ )":
-                                text_map = "".join(["█" if v < 110 else " " for v in pixels])
-                            else:
-                                # Shaded structural gradient
-                                density_ramp = "█▓▒░ "
-                                ramp_len = len(density_ramp)
-                                text_map = "".join([density_ramp[int(v * (ramp_len - 1) / 255)] for v in pixels])
+                        # Group string data into precise line arrays
+                        lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
+                        return "```\n" + "\n".join(lines) + "\n```"
 
-                            # Group string data into precise line arrays
-                            lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
-                            return "```\n" + "\n".join(lines) + "\n```"
-
-                    # PROCESS EVERY FRAME FOR NATIVE GIF ASSETS
+                    # Handle native multi-layer GIF assets cleanly without frame clipping
                     if file_ext == ".gif":
                         gif_sequence = Image.open(io.BytesIO(file_bytes))
+                        frame_index = 0
                         for frame in ImageSequence.Iterator(gif_sequence):
-                            converted_layer = target_render_frame(frame.copy(), render_style, char_width)
-                            compiled_frames.append(converted_layer)
+                            # Capture every 2nd frame to optimize processing while preserving motion
+                            if frame_index % 2 == 0:
+                                converted_layer = target_render_frame(frame.copy(), render_style, char_width)
+                                compiled_frames.append(converted_layer)
+                            frame_index += 1
                     else:
-                        # PROCESS EVERY FRAME FOR VIDEO FILE PAYLOADS
+                        # Process video files
                         with tempfile.NamedTemporaryFile(delete=False, suffix=file_ext) as temp_video:
                             temp_video.write(file_bytes)
                             temp_path = temp_video.name
 
                         cap = cv2.VideoCapture(temp_path)
+                        frame_count = 0
                         while cap.isOpened():
                             ret, frame_bgr = cap.read()
                             if not ret:
                                 break
-                            frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
-                            pil_frame = Image.fromarray(frame_rgb)
-                            compiled_frames.append(target_render_frame(pil_frame, render_style, char_width))
+                            # Keep playback fluid by targeting an optimal framing window rate
+                            if frame_count % 3 == 0:
+                                frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+                                pil_frame = Image.fromarray(frame_rgb)
+                                compiled_frames.append(target_render_frame(pil_frame, render_style, char_width))
+                            frame_count += 1
                         cap.release()
                         try: os.remove(temp_path)
                         except: pass
 
-                    # Enforce stable structural play limits to prevent connection blockages
-                    if len(compiled_frames) > 85:
-                        step = len(compiled_frames) // 80
-                        compiled_frames = compiled_frames[::step][:80]
+                    # Enforce strict safety payload limits for stable transmission
+                    if len(compiled_frames) > 45:
+                        # Slice array evenly to optimize performance within technical safety guidelines
+                        step = len(compiled_frames) // 40
+                        compiled_frames = compiled_frames[::step][:40]
 
                     if compiled_frames:
                         st.session_state.converted_media_frames = compiled_frames
@@ -910,13 +842,14 @@ with tabs[24]:
                                     transaction_complete = True
                                     time.sleep(base_delay)
                                 elif patch_res.status_code == 429:
+                                    # Dynamically capture Discord's exact cooldown requirements
                                     rate_limit_data = patch_res.json()
                                     backoff_timer = float(rate_limit_data.get("retry_after", 1.5))
                                     monitor.warning(f"⏳ Rate Limit Triggered. Cool-down active: `{backoff_timer}s`...")
                                     time.sleep(backoff_timer + 0.1)
                                 else:
                                     monitor.error(f"❌ Connection pipeline failure code: {patch_res.status_code}")
-                                    transaction_complete = True
+                                    transaction_complete = True # Force breakthrough on fatal channel blocks
                     
                     monitor.success("✨ Sequence array streaming successfully finalized!")
                     log_to_console("✨ 2D Matrix Engine operation wrapped up safely.")
