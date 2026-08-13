@@ -22,8 +22,7 @@ NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 MODELS_ENDPOINT = f"{NVIDIA_BASE_URL}/models"
 CHAT_ENDPOINT = f"{NVIDIA_BASE_URL}/chat/completions"
 REQUEST_TIMEOUT = 15  # seconds
-if not st.session_state.models:
-    st.session_state.models = []
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
