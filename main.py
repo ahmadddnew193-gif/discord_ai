@@ -30,7 +30,7 @@ logger = logging.getLogger("nvidia_model_picker")
 st.set_page_config(page_title="Discord AI Control Panel", page_icon="🛡️", layout="wide")
 
 # --- SECURE LOGIN SYSTEM ---
-MASTER_KEY = st.secrets.get("MASTER_KEY", "CHANGEME")
+MASTER_KEY = st.secrets.get("MASTER_KEY")
 CODE_FILE = "active_code.txt"
 MEMORY_FILE = "conversation_memory.json"
 PROCESSED_MSG_FILE = "processed_messages.json"  # persistent message IDs
