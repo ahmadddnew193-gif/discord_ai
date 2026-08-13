@@ -364,7 +364,7 @@ tabs = st.tabs(tabs_list)
 # --- TAB 1: BOT CONTROL ---
 with tabs[0]:
     
-    modelinput = st.text_input(model_id)
+    modelinput = st.text_input("model id: ")
     col1, col2 = st.columns(2)
     with col1:
         persona_dict = {
