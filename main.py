@@ -290,11 +290,11 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
                 sender = f"[{m['author']['username']}]: " if role == "user" else ""
                 chat_history.append({"role": role, "content": f"{sender}{m['content']}"})
 
-        response = client.chat.completions.create(model="openrouter/free", messages=chat_history)
+        response = client.chat.completions.create(model=modelin,messages=chat_history)
         reply = response.choices[0].message.content
         
         new_summary_prompt = f"Summarize key points in 2 sentences: {reply}"
-        summary_resp = client.chat.completions.create(model="openrouter/free", messages=[{"role": "user", "content": new_summary_prompt}])
+        summary_resp = client.chat.completions.create(model=modelin,messages=[{"role": "user", "content": new_summary_prompt}])
         save_memory(channel_id, summary_resp.choices[0].message.content)
 
         if not enable_safety or safety_filter(reply):
@@ -326,7 +326,7 @@ with st.sidebar:
     else: 
         my_username, my_id = None, None
 
-    or_key = st.text_input("OpenRouter API Key", type="password").strip()
+    or_key = st.text_input("nvidia API Key", type="password").strip()
     channel_id_input_raw = st.text_input("Channel ID")
     channel_id_input = channel_id_input_raw.strip().replace("\r", "").replace("\n", "") if channel_id_input_raw else ""
     st.divider()
@@ -385,7 +385,7 @@ with tabs[0]:
     allowed_users = "everyone" if allowed_input.lower().strip() == "everyone" else [u.strip().lower() for u in allowed_input.split(",") if u.strip()]
     blacklisted_users = [u.strip().lower() for u in blacklisted_users_input.split(",") if u.strip()]
     blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
-    client = openai.OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1") if or_key else None
+    client = openai.OpenAI(api_key=or_key, base_url=NVIDIA_BASE_URL) if or_key else None
 
     c1, c2 = st.columns(2)
     with c1:
