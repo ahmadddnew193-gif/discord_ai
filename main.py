@@ -10,14 +10,89 @@ import pandas as pd
 import json
 import re
 from duckduckgo_search import DDGS
+import logging
+from typing import Optional
 
+ 
+# --------------------------------------------------------------------------
+# Config
+# --------------------------------------------------------------------------
+ 
+NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
+MODELS_ENDPOINT = f"{NVIDIA_BASE_URL}/models"
+CHAT_ENDPOINT = f"{NVIDIA_BASE_URL}/chat/completions"
+REQUEST_TIMEOUT = 15  # seconds
+if not st.session_state.models:
+    st.session_state.models = []
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+)
+logger = logging.getLogger("nvidia_model_picker")
 st.set_page_config(page_title="Discord AI Control Panel", page_icon="🛡️", layout="wide")
 
 # --- SECURE LOGIN SYSTEM ---
 MASTER_KEY = st.secrets.get("MASTER_KEY", "CHANGEME")
 CODE_FILE = "active_code.txt"
 MEMORY_FILE = "conversation_memory.json"
+ 
+def fetch_nvidia_models(api_key: str, timeout: int = REQUEST_TIMEOUT) -> list[dict]:
 
+    if not api_key or not api_key.strip():
+        raise ValueError("An NVIDIA API key is required to fetch models.")
+ 
+    headers = {
+        "Authorization": f"Bearer {api_key.strip()}",
+        "Accept": "application/json",
+    }
+ 
+    logger.info("Fetching model list from %s", MODELS_ENDPOINT)
+ 
+    try:
+        response = requests.get(MODELS_ENDPOINT, headers=headers, timeout=timeout)
+    except requests.exceptions.Timeout as exc:
+        logger.error("Request to NVIDIA API timed out after %ss", timeout)
+        raise requests.exceptions.Timeout(
+            f"Timed out after {timeout}s contacting {MODELS_ENDPOINT}"
+        ) from exc
+    except requests.exceptions.ConnectionError as exc:
+        logger.error("Connection error contacting NVIDIA API: %s", exc)
+        raise
+ 
+    if response.status_code == 401:
+        logger.error("NVIDIA API returned 401 Unauthorized — invalid API key.")
+        raise requests.exceptions.HTTPError(
+            "401 Unauthorized: check that your NVIDIA API key is valid.",
+            response=response,
+        )
+    if response.status_code == 429:
+        logger.error("NVIDIA API rate limit hit (429).")
+        raise requests.exceptions.HTTPError(
+            "429 Too Many Requests: you've hit the free-tier rate limit. Wait and retry.",
+            response=response,
+        )
+    if response.status_code == 402:
+        logger.error("NVIDIA API returned 402 — credits/quota exhausted.")
+        raise requests.exceptions.HTTPError(
+            "402 Payment Required: free credits/quota exhausted for this key.",
+            response=response,
+        )
+ 
+    response.raise_for_status()
+ 
+    try:
+        payload = response.json()
+    except ValueError as exc:
+        logger.error("Failed to parse JSON from NVIDIA API response.")
+        raise ValueError("NVIDIA API did not return valid JSON.") from exc
+ 
+    models = payload.get("data", [])
+    if not isinstance(models, list):
+        raise ValueError("Unexpected response shape from NVIDIA API: 'data' is not a list.")
+ 
+    models_sorted = sorted(models, key=lambda m: m.get("id", ""))
+    logger.info("Fetched %d models", len(models_sorted))
+    return models_sorted
 def set_global_code(code):
     with open(CODE_FILE, "w") as f:
         f.write(f"{code},{time.time()}")
