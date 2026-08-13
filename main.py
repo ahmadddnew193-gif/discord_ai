@@ -402,7 +402,6 @@ with tabs[0]:
             log_to_console("🛑 Discord AI Core Listener Powered Down.")
             st.rerun()
 
-    
     if st.session_state.bot_running:
         status_box.info("Status: 🟢 ONLINE / IDLE")
         headers = get_headers(token)
@@ -414,21 +413,33 @@ with tabs[0]:
             if r.status_code == 200:
                 msgs = r.json()
                 if msgs and isinstance(msgs, list):
-                    # Find the latest message that is NOT from the bot
+                    # Iterate from newest to oldest
                     for msg in msgs:
-                        if str(msg['author']['id']) != str(my_id):
-                            # This is a user message
-                            if msg['id'] != st.session_state.last_msg_id:
-                                # New user message – process it
-                                st.session_state.last_msg_id = msg['id']
-                                background_reply(
-                                    msg, discord_url, typing_url, headers,
-                                    client, system_prompt, my_id, my_username,
-                                    memory_depth, enable_safety, reaction_delay,
-                                    resp_delay, owner_id_input, emoji_pool,
-                                    mention_only, modelinput
-                                )
-                            break  # only process the most recent user message
+                        author_id = str(msg['author']['id'])
+                        msg_id = msg['id']
+                        content = msg['content'].strip()
+                        
+                        # Skip if this message is our own AI reply
+                        if author_id == str(my_id) and content == st.session_state.last_ai_content:
+                            continue
+                        
+                        # Now we have a candidate (either another user or our own non‑reply message)
+                        # Check if we already processed this exact message ID
+                        if msg_id != st.session_state.last_msg_id:
+                            # Process it
+                            st.session_state.last_msg_id = msg_id
+                            background_reply(
+                                msg, discord_url, typing_url, headers,
+                                client, system_prompt, my_id, my_username,
+                                memory_depth, enable_safety, reaction_delay,
+                                resp_delay, owner_id_input, emoji_pool,
+                                mention_only, modelinput
+                            )
+                            # Only process the most recent unprocessed message
+                            break
+                        else:
+                            # This message is already processed; older messages are also processed, so stop
+                            break
             time.sleep(poll_speed)
             st.rerun()
         except Exception as e:
