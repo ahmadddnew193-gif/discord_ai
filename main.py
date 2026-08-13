@@ -252,7 +252,7 @@ def safety_filter(text):
             return False
     return True
 
-def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool, mention_only):
+def background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool, mention_only,modelin):
     try:
         channel_id = latest['channel_id']
         author_username = latest['author']['username'].lower()
@@ -364,6 +364,8 @@ tabs = st.tabs(tabs_list)
 
 # --- TAB 1: BOT CONTROL ---
 with tabs[0]:
+    
+    modelinput = st.text_input(model_id)
     col1, col2 = st.columns(2)
     with col1:
         persona_dict = {
@@ -386,7 +388,8 @@ with tabs[0]:
     blacklisted_users = [u.strip().lower() for u in blacklisted_users_input.split(",") if u.strip()]
     blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
     client = openai.OpenAI(api_key=or_key, base_url=NVIDIA_BASE_URL) if or_key else None
-
+    modelsout = fetch_nvidia_models(or_key)
+    st.success(modelsout)
     c1, c2 = st.columns(2)
     with c1:
         if st.button("▶️ Launch Bot", disabled=not (my_username and or_key), use_container_width=True):
@@ -415,7 +418,7 @@ with tabs[0]:
                     if latest['id'] != st.session_state.last_msg_id:
                         st.session_state.last_msg_id = latest['id']
                         if latest['content'] != st.session_state.last_ai_content:
-                            background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool, mention_only)
+                            background_reply(latest, discord_url, typing_url, headers, client, system_prompt, my_id, my_username, memory_depth, enable_safety, reaction_delay, resp_delay, owner_id_input, emoji_pool, mention_only,modelinput)
             time.sleep(poll_speed)
             st.rerun()
         except: 
