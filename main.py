@@ -207,7 +207,7 @@ for key, val in {
     "memory": {}, "processed_dms": set(),
     "last_activity": time.time(), "typing_active": False, "bio_anim_active": False,
     "last_ai_content": None, "bot_start_time": time.time(),
-    "last_msg_id": None, "debug_log": "System Ready..."
+    "last_msg_id": None, "processed_msg_ids": set(), "debug_log": "System Ready..."
 }.items():
     if key not in st.session_state:
         st.session_state[key] = val
@@ -298,11 +298,16 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
 
         if not enable_safety or safety_filter(reply):
             if resp_delay > 0 and not is_owner: time.sleep(resp_delay)
+            post_resp = requests.post(discord_url, json={"content": reply}, headers=headers, timeout=5)
+            if post_resp.status_code not in (200, 201):
+                st.session_state.debug_log = f"Discord post failed: {post_resp.status_code} {post_resp.text}"
+                log_to_console(f"❌ Failed to send reply: {post_resp.status_code}")
+                return False
             st.session_state.last_ai_content = reply.strip()
-            requests.post(discord_url, json={"content": reply}, headers=headers, timeout=5)
             log_to_csv(author_username, content, "Reply Sent")
             log_to_console(f"🤖 AI responded to [{author_username}] in channel {channel_id}")
             return True
+        return False
     except Exception as e:
         st.session_state.debug_log = f"Error: {str(e)}"
         log_to_console(f"❌ Automation runtime error: {str(e)}")
@@ -415,31 +420,31 @@ with tabs[0]:
                 if msgs and isinstance(msgs, list):
                     # Iterate from newest to oldest
                     for msg in msgs:
-                        author_id = str(msg['author']['id'])
                         msg_id = msg['id']
-                        content = msg['content'].strip()
+                        author_id = str(msg['author']['id'])
                         
-                        # Skip if this message is our own AI reply
-                        if author_id == str(my_id) and content == st.session_state.last_ai_content:
+                        # Skip messages sent by the bot itself
+                        if author_id == str(my_id):
                             continue
                         
-                        # Now we have a candidate (either another user or our own non‑reply message)
-                        # Check if we already processed this exact message ID
-                        if msg_id != st.session_state.last_msg_id:
-                            # Process it
-                            st.session_state.last_msg_id = msg_id
-                            background_reply(
-                                msg, discord_url, typing_url, headers,
-                                client, system_prompt, my_id, my_username,
-                                memory_depth, enable_safety, reaction_delay,
-                                resp_delay, owner_id_input, emoji_pool,
-                                mention_only, modelinput
-                            )
-                            # Only process the most recent unprocessed message
-                            break
-                        else:
-                            # This message is already processed; older messages are also processed, so stop
-                            break
+                        # Skip messages we have already successfully answered
+                        if msg_id in st.session_state.processed_msg_ids:
+                            continue
+                        
+                        # Found an unprocessed user message: try to reply
+                        success = background_reply(
+                            msg, discord_url, typing_url, headers,
+                            client, system_prompt, my_id, my_username,
+                            memory_depth, enable_safety, reaction_delay,
+                            resp_delay, owner_id_input, emoji_pool,
+                            mention_only, modelinput
+                        )
+                        
+                        if success:
+                            st.session_state.processed_msg_ids.add(msg_id)
+                        
+                        # Process only one message per cycle to avoid rate limits
+                        break
             time.sleep(poll_speed)
             st.rerun()
         except Exception as e:
