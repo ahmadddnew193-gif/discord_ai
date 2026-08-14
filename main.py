@@ -263,11 +263,6 @@ def validate_token(tk):
         pass
     return False, None
 
-def add_reaction(channel_id, message_id, emoji, headers):
-    encoded_emoji = requests.utils.quote(emoji)
-    url = f"https://discord.com/api/v9/channels/{channel_id}/messages/{message_id}/reactions/{encoded_emoji}/@me"
-    requests.put(url, headers=headers, timeout=5)
-
 def safety_filter(text):
     harmful_terms = ["self-harm", "suicide", "kys", "kill yourself", "harming myself"]
     for term in harmful_terms:
@@ -276,8 +271,8 @@ def safety_filter(text):
     return True
 
 def background_reply(latest, discord_url, typing_url, headers, client, system_prompt,
-                     my_id, my_username, memory_depth, enable_safety, reaction_delay,
-                     resp_delay, owner_id_input, emoji_pool, mention_only, model_id):
+                     my_id, my_username, memory_depth, enable_safety, resp_delay,
+                     owner_id_input, mention_only, model_id):
     try:
         channel_id = latest['channel_id']
         author_username = latest['author']['username'].lower()
@@ -296,15 +291,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             return False
 
         requests.post(typing_url, headers=headers, timeout=5)
-
-        if emoji_pool:
-            reaction_emoji = random.choice(emoji_pool)
-        else:
-            reaction_emoji = "👑" if is_owner else "💬"
-
-        if reaction_delay > 0 and not is_owner:
-            time.sleep(reaction_delay)
-        add_reaction(channel_id, msg_id, reaction_emoji, headers)
 
         long_term_mem = load_memory(channel_id)
         urls = re.findall(r'(https?://[^\s]+)', content)
@@ -349,7 +335,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         if AI_TAG not in reply:
             reply = f"{reply.strip()} {AI_TAG}"
         else:
-            # Optionally, ensure it's at the end
             reply = reply.strip()
         log_to_console(f"✅ Received AI reply: {reply[:50]}...")
 
@@ -416,16 +401,15 @@ with st.sidebar:
     st.session_state.mention_only = mention_only
 
     if st.session_state.bot_running:
-        st.markdown("### 🟢 Connection Active")  # static indicator, no flickering
+        st.markdown("### 🟢 Connection Active")
 
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
     st.session_state.memory_depth = memory_depth
-    poll_speed = st.slider("Polling Frequency (Seconds)", 0.1, 5.0, 1.0)
+    # Reduced default polling frequency to 0.5 seconds
+    poll_speed = st.slider("Polling Frequency (Seconds)", 0.1, 5.0, 0.5)
     st.session_state.poll_speed = poll_speed
     resp_delay = st.slider("Response Delay (Seconds)", 0.0, 5.0, 0.0)
     st.session_state.resp_delay = resp_delay
-    reaction_delay = st.slider("Reaction Delay (Seconds)", min_value=0, max_value=5, value=0)
-    st.session_state.reaction_delay = reaction_delay
 
     c_safety, c_restart = st.columns(2)
     with c_safety:
@@ -433,10 +417,6 @@ with st.sidebar:
         st.session_state.enable_safety = enable_safety
     with c_restart:
         auto_restart_10m = st.toggle("10m Auto-Restart", value=False)
-
-    emoji_pool_raw = st.text_input("Custom Emoji Pool", placeholder="🔥,💀,✅,🧠")
-    emoji_pool = [e.strip() for e in emoji_pool_raw.split(",") if e.strip()]
-    st.session_state.emoji_pool = emoji_pool
 
 # --- Tabs ---
 tabs_list = [
@@ -531,41 +511,47 @@ with tabs[0]:
             if r.status_code == 200:
                 msgs = r.json()
                 if msgs and isinstance(msgs, list):
+                    # Process messages from newest to oldest, but stop at first unprocessed
                     for msg in msgs:
                         msg_id = msg['id']
                         author_id = str(msg['author']['id'])
                         content = msg['content'].strip()
 
-                        # --- Skip messages from the bot itself (by ID) ---
+                        # Skip messages from the bot itself
                         if author_id == str(st.session_state.my_id):
                             continue
 
-                        # --- Skip messages containing the AI tag ---
+                        # Skip messages containing the AI tag
                         if AI_TAG in content:
                             log_to_console(f"⏭️ Skipping message with AI tag: {content[:50]}...")
                             continue
 
-                        # Skip already processed message IDs
+                        # Skip already processed
                         if msg_id in st.session_state.processed_msg_ids:
                             continue
 
-                        # Attempt to reply
+                        # Found an unprocessed message -> process it
                         success = background_reply(
                             msg, discord_url, typing_url, headers,
                             client, st.session_state.system_prompt,
                             st.session_state.my_id, st.session_state.my_username,
                             st.session_state.memory_depth, st.session_state.enable_safety,
-                            st.session_state.reaction_delay, st.session_state.resp_delay,
-                            st.session_state.owner_id_input, st.session_state.emoji_pool,
-                            st.session_state.mention_only, st.session_state.model_id
+                            st.session_state.resp_delay,
+                            st.session_state.owner_id_input, st.session_state.mention_only,
+                            st.session_state.model_id
                         )
                         if success:
                             st.session_state.processed_msg_ids.add(msg_id)
                             save_processed_ids(st.session_state.processed_msg_ids)
                             log_to_console(f"✅ Message {msg_id} processed.")
-                        break  # one message per cycle
+                        # After processing (or failure), break to avoid processing multiple messages per cycle
+                        break
 
-            time.sleep(st.session_state.poll_speed)
+            # If no message was processed, sleep a bit; otherwise, rerun immediately
+            if not any(msg_id not in st.session_state.processed_msg_ids for msg in msgs if str(msg['author']['id']) != str(st.session_state.my_id) and AI_TAG not in msg['content']):
+                time.sleep(st.session_state.poll_speed)
+            else:
+                time.sleep(0.2)  # small delay to avoid hammering Discord
             st.rerun()
         except Exception as e:
             log_to_console(f"⚠️ Polling error: {str(e)}")
