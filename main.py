@@ -285,7 +285,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             if f"<@{my_id}>" not in content and f"<@!{my_id}>" not in content:
                 return False
 
-        # Check if we are in NVIDIA rate‑limit cooldown
+        # Check NVIDIA rate‑limit cooldown
         if time.time() < st.session_state.nvidia_retry_after:
             log_to_console(f"⏳ Rate‑limit cooldown until {datetime.fromtimestamp(st.session_state.nvidia_retry_after).strftime('%H:%M:%S')}. Skipping message.")
             return False
@@ -331,14 +331,20 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             st.session_state.debug_log = f"NVIDIA API error: {str(e)}"
             return False
 
-        # Ensure the tag is present at the end of the reply
+        # --- Truncate to Discord's 2000‑character limit ---
+        MAX_MSG_LEN = 2000
+        TAG_LEN = len(AI_TAG)
         if AI_TAG not in reply:
-            reply = f"{reply.strip()} {AI_TAG}"
+            # Append tag, leaving room for it
+            max_content_len = MAX_MSG_LEN - TAG_LEN - 1  # -1 for space
+            reply = reply.strip()[:max_content_len] + " " + AI_TAG
         else:
-            reply = reply.strip()
-        log_to_console(f"✅ Received AI reply: {reply[:50]}...")
+            # Tag already there, just truncate overall to 2000
+            reply = reply.strip()[:MAX_MSG_LEN]
 
-        # Now do summary (also rate‑limit protected)
+        log_to_console(f"✅ Received AI reply (length={len(reply)}): {reply[:50]}...")
+
+        # Summary (unchanged)
         new_summary_prompt = f"Summarize key points in 2 sentences: {reply}"
         try:
             summary_resp = client.chat.completions.create(model=model_id, messages=[{"role": "user", "content": new_summary_prompt}])
@@ -356,7 +362,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             post_resp = requests.post(discord_url, json={"content": reply}, headers=headers, timeout=5)
             if post_resp.status_code not in (200, 201):
                 st.session_state.debug_log = f"Discord post failed: {post_resp.status_code} {post_resp.text}"
-                log_to_console(f"❌ Failed to send reply: {post_resp.status_code}")
+                log_to_console(f"❌ Failed to send reply: {post_resp.status_code} (length={len(reply)})")
                 return False
             st.session_state.last_ai_content = reply.strip()
             log_to_csv(author_username, content, "Reply Sent")
@@ -511,7 +517,6 @@ with tabs[0]:
             if r.status_code == 200:
                 msgs = r.json()
                 if msgs and isinstance(msgs, list):
-                    # Process messages from newest to oldest, but stop at first unprocessed
                     for msg in msgs:
                         msg_id = msg['id']
                         author_id = str(msg['author']['id'])
@@ -521,7 +526,7 @@ with tabs[0]:
                         if author_id == str(st.session_state.my_id):
                             continue
 
-                        # Skip messages containing the AI tag
+                        # Skip any message containing the AI tag
                         if AI_TAG in content:
                             log_to_console(f"⏭️ Skipping message with AI tag: {content[:50]}...")
                             continue
@@ -530,7 +535,7 @@ with tabs[0]:
                         if msg_id in st.session_state.processed_msg_ids:
                             continue
 
-                        # Found an unprocessed message -> process it
+                        # Process the message
                         success = background_reply(
                             msg, discord_url, typing_url, headers,
                             client, st.session_state.system_prompt,
@@ -544,14 +549,10 @@ with tabs[0]:
                             st.session_state.processed_msg_ids.add(msg_id)
                             save_processed_ids(st.session_state.processed_msg_ids)
                             log_to_console(f"✅ Message {msg_id} processed.")
-                        # After processing (or failure), break to avoid processing multiple messages per cycle
+                        # Process only one message per polling cycle
                         break
 
-            # If no message was processed, sleep a bit; otherwise, rerun immediately
-            if not any(msg_id not in st.session_state.processed_msg_ids for msg in msgs if str(msg['author']['id']) != str(st.session_state.my_id) and AI_TAG not in msg['content']):
-                time.sleep(st.session_state.poll_speed)
-            else:
-                time.sleep(0.2)  # small delay to avoid hammering Discord
+            time.sleep(st.session_state.poll_speed)
             st.rerun()
         except Exception as e:
             log_to_console(f"⚠️ Polling error: {str(e)}")
@@ -560,7 +561,7 @@ with tabs[0]:
     else:
         st.info("Bot is stopped.")
 
-# ============ ALL OTHER TABS (unchanged from previous) ============
+# ============ ALL OTHER TABS (unchanged from original) ============
 # Tab 2: History Scraper
 with tabs[1]:
     st.header("📥 Channel History Scraper")
@@ -915,7 +916,7 @@ with tabs[23]:
             else:
                 st.error(f"Failed to patch structural status: {res.status_code}")
 
-# Tab 25: 2D Animator (unchanged)
+# Tab 25: 2D Animator
 with tabs[24]:
     st.header("🎬 2D Animator (Advanced Multi-Profile Engine)")
     anim_ch_raw = st.text_input("Target Channel ID", value=st.session_state.channel_id, key="anim_ch_id")
