@@ -166,6 +166,7 @@ for s_key, s_val in {
     "discord_token": "",
     "channel_id": "",
     "model_id": "",
+    "nvidia_retry_after": 0,          # timestamp until which NVIDIA API should not be called
 }.items():
     if s_key not in st.session_state:
         st.session_state[s_key] = s_val
@@ -286,6 +287,11 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             if f"<@{my_id}>" not in content and f"<@!{my_id}>" not in content:
                 return False
 
+        # Check if we are in NVIDIA rate‑limit cooldown
+        if time.time() < st.session_state.nvidia_retry_after:
+            log_to_console(f"⏳ Rate‑limit cooldown until {datetime.fromtimestamp(st.session_state.nvidia_retry_after).strftime('%H:%M:%S')}. Skipping message.")
+            return False
+
         requests.post(typing_url, headers=headers, timeout=5)
 
         if emoji_pool:
@@ -313,13 +319,44 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
                 chat_history.append({"role": role, "content": f"{sender}{m['content']}"})
 
         log_to_console(f"📡 Sending request to NVIDIA model: {model_id}")
-        response = client.chat.completions.create(model=model_id, messages=chat_history)
-        reply = response.choices[0].message.content
+
+        # --- Call NVIDIA API with rate‑limit handling ---
+        try:
+            response = client.chat.completions.create(model=model_id, messages=chat_history)
+            reply = response.choices[0].message.content
+        except openai.RateLimitError as e:
+            # Extract retry_after if available, otherwise default to 60 seconds
+            retry_after = getattr(e, 'retry_after', None)
+            if retry_after is None:
+                # Try to parse from response body if possible
+                try:
+                    body = e.response.json()
+                    retry_after = body.get('retry_after', 60)
+                except:
+                    retry_after = 60
+            st.session_state.nvidia_retry_after = time.time() + float(retry_after)
+            log_to_console(f"⚠️ NVIDIA rate limit hit. Cooldown until {datetime.fromtimestamp(st.session_state.nvidia_retry_after).strftime('%H:%M:%S')}. Waiting {retry_after}s.")
+            return False
+        except Exception as e:
+            # Other errors: log and mark as failed (do not retry indefinitely)
+            log_to_console(f"❌ NVIDIA API error: {str(e)}")
+            st.session_state.debug_log = f"NVIDIA API error: {str(e)}"
+            return False
+
         log_to_console(f"✅ Received AI reply: {reply[:50]}...")
 
+        # Now do summary (also rate‑limit protected)
         new_summary_prompt = f"Summarize key points in 2 sentences: {reply}"
-        summary_resp = client.chat.completions.create(model=model_id, messages=[{"role": "user", "content": new_summary_prompt}])
-        save_memory(channel_id, summary_resp.choices[0].message.content)
+        try:
+            summary_resp = client.chat.completions.create(model=model_id, messages=[{"role": "user", "content": new_summary_prompt}])
+            save_memory(channel_id, summary_resp.choices[0].message.content)
+        except openai.RateLimitError as e:
+            retry_after = getattr(e, 'retry_after', 60)
+            st.session_state.nvidia_retry_after = time.time() + float(retry_after)
+            log_to_console(f"⚠️ NVIDIA rate limit during summary. Cooldown set.")
+            # Still send the reply (even if summary fails), but we can continue
+        except Exception as e:
+            log_to_console(f"⚠️ Memory summary failed: {str(e)}")
 
         if not enable_safety or safety_filter(reply):
             if resp_delay > 0 and not is_owner:
@@ -514,6 +551,7 @@ with tabs[0]:
                             st.session_state.processed_msg_ids.add(msg_id)
                             save_processed_ids(st.session_state.processed_msg_ids)
                             log_to_console(f"✅ Message {msg_id} processed.")
+                        # If not success, message will be retried after cooldown if applicable
                         break  # one message per cycle
 
             time.sleep(st.session_state.poll_speed)
