@@ -560,50 +560,48 @@ with tabs[0]:
             if r.status_code == 200:
                 msgs = r.json()
                 if msgs and isinstance(msgs, list):
-                    # Iterate from newest to oldest
+                    # Filter out bot messages and AI tags
+                    candidate_msgs = []
                     for msg in msgs:
-                        msg_id = msg['id']
-                        author_id = str(msg['author']['id'])
-                        content = msg['content'].strip()
-
-                        # Skip messages from the bot itself (by ID)
-                        if author_id == str(st.session_state.my_id):
+                        if str(msg['author']['id']) == str(st.session_state.my_id):
                             continue
-
-                        # Skip messages containing the AI tag
-                        if AI_TAG in content:
-                            log_to_console(f"⏭️ Skipping message with AI tag: {content[:50]}...")
+                        if AI_TAG in msg['content'].strip():
                             continue
+                        candidate_msgs.append(msg)
 
-                        # Skip already processed message IDs
+                    if candidate_msgs:
+                        # Only consider the newest eligible message
+                        newest_msg = candidate_msgs[0]
+                        msg_id = newest_msg['id']
+                        content = newest_msg['content'].strip()
+
                         if msg_id in st.session_state.processed_msg_ids:
-                            continue
-
-                        # --- Prefix check (moved here) ---
-                        prefix = st.session_state.prefix
-                        if prefix and not content.startswith(prefix):
-                            log_to_console(f"⏭️ Message does not start with prefix '{prefix}': {content[:30]}...")
-                            # IMPORTANT: Break instead of continue so we do NOT process older messages
-                            break
-
-                        # Attempt to reply
-                        success = background_reply(
-                            msg, discord_url, typing_url, headers,
-                            client, st.session_state.system_prompt,
-                            st.session_state.my_id, st.session_state.my_username,
-                            st.session_state.memory_depth, st.session_state.enable_safety,
-                            st.session_state.reaction_delay, st.session_state.resp_delay,
-                            st.session_state.owner_id_input, st.session_state.emoji_pool,
-                            st.session_state.mention_only, st.session_state.model_id,
-                            st.session_state.reaction_mode
-                        )
-                        if success:
-                            st.session_state.processed_msg_ids.add(msg_id)
-                            save_processed_ids(st.session_state.processed_msg_ids)
-                            log_to_console(f"✅ Message {msg_id} processed.")
-                        # After processing (or failing), break so we don't process multiple messages per cycle
-                        break
-
+                            # Already processed; do nothing
+                            pass
+                        else:
+                            prefix = st.session_state.prefix
+                            if prefix and not content.startswith(prefix):
+                                # Log once, then mark as processed to avoid re-checking
+                                log_to_console(f"⏭️ Message does not start with prefix '{prefix}': {content[:30]}...")
+                                st.session_state.processed_msg_ids.add(msg_id)
+                                save_processed_ids(st.session_state.processed_msg_ids)
+                            else:
+                                # Attempt to reply
+                                success = background_reply(
+                                    newest_msg, discord_url, typing_url, headers,
+                                    client, st.session_state.system_prompt,
+                                    st.session_state.my_id, st.session_state.my_username,
+                                    st.session_state.memory_depth, st.session_state.enable_safety,
+                                    st.session_state.reaction_delay, st.session_state.resp_delay,
+                                    st.session_state.owner_id_input, st.session_state.emoji_pool,
+                                    st.session_state.mention_only, st.session_state.model_id,
+                                    st.session_state.reaction_mode
+                                )
+                                if success:
+                                    st.session_state.processed_msg_ids.add(msg_id)
+                                    save_processed_ids(st.session_state.processed_msg_ids)
+                                    log_to_console(f"✅ Message {msg_id} processed.")
+                                # If not success, message will be retried next cycle (unless rate limited, etc.)
             time.sleep(st.session_state.poll_speed)
             st.rerun()
         except Exception as e:
