@@ -25,13 +25,6 @@ REQUEST_TIMEOUT = 15  # seconds
 # Tag that the AI appends to every response
 AI_TAG = "[AI_RESPONSE]"
 
-# Default emoji list for AI Random mode
-AI_RANDOM_EMOJIS = [
-    "😀", "😂", "🤣", "😊", "😍", "🤔", "😎", "👍", "👎", "🙏",
-    "🎉", "✨", "🔥", "💯", "✅", "❌", "💬", "👑", "🤖", "🧠",
-    "🚀", "⭐", "🌟", "💡", "📌", "🎯", "💎", "🍕", "🎵", "❤️"
-]
-
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -177,7 +170,6 @@ for s_key, s_val in {
     "channel_id": "",
     "model_id": "",
     "nvidia_retry_after": 0,          # timestamp until which NVIDIA API should not be called
-    "reaction_mode": "Custom Pool",   # default reaction mode
 }.items():
     if s_key not in st.session_state:
         st.session_state[s_key] = s_val
@@ -285,8 +277,7 @@ def safety_filter(text):
 
 def background_reply(latest, discord_url, typing_url, headers, client, system_prompt,
                      my_id, my_username, memory_depth, enable_safety, reaction_delay,
-                     resp_delay, owner_id_input, emoji_pool, mention_only, model_id,
-                     reaction_mode):
+                     resp_delay, owner_id_input, emoji_pool, mention_only, model_id):
     try:
         channel_id = latest['channel_id']
         author_username = latest['author']['username'].lower()
@@ -295,10 +286,8 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         msg_id = latest['id']
         is_owner = author_id == str(owner_id_input).strip()
 
-        # --- Mention-only check ---
         if mention_only and not is_owner:
             if f"<@{my_id}>" not in content and f"<@!{my_id}>" not in content:
-                log_to_console("⏭️ Mention-only mode: message does not mention bot. Skipping.")
                 return False
 
         # Check if we are in NVIDIA rate‑limit cooldown
@@ -308,22 +297,14 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
 
         requests.post(typing_url, headers=headers, timeout=5)
 
-        # --- Reaction logic ---
-        if reaction_mode == "Custom Pool":
-            if emoji_pool:
-                reaction_emoji = random.choice(emoji_pool)
-            else:
-                reaction_emoji = "👑" if is_owner else "💬"
-        elif reaction_mode == "AI Random":
-            reaction_emoji = random.choice(AI_RANDOM_EMOJIS)
-        else:  # Off
-            reaction_emoji = None
+        if emoji_pool:
+            reaction_emoji = random.choice(emoji_pool)
+        else:
+            reaction_emoji = "👑" if is_owner else "💬"
 
-        if reaction_emoji:
-            if reaction_delay > 0 and not is_owner:
-                time.sleep(reaction_delay)
-            add_reaction(channel_id, msg_id, reaction_emoji, headers)
-            log_to_console(f"👍 Reacted with {reaction_emoji}")
+        if reaction_delay > 0 and not is_owner:
+            time.sleep(reaction_delay)
+        add_reaction(channel_id, msg_id, reaction_emoji, headers)
 
         long_term_mem = load_memory(channel_id)
         urls = re.findall(r'(https?://[^\s]+)', content)
@@ -368,6 +349,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         if AI_TAG not in reply:
             reply = f"{reply.strip()} {AI_TAG}"
         else:
+            # Optionally, ensure it's at the end
             reply = reply.strip()
         log_to_console(f"✅ Received AI reply: {reply[:50]}...")
 
@@ -432,11 +414,6 @@ with st.sidebar:
     st.header("⚙️ Bot Settings")
     mention_only = st.toggle("Mention-Only Mode (429 Protection)", value=False)
     st.session_state.mention_only = mention_only
-
-    # --- Reaction mode ---
-    reaction_mode = st.selectbox("Reaction Mode", ["Off", "Custom Pool", "AI Random"],
-                                 index=1)  # Default to Custom Pool
-    st.session_state.reaction_mode = reaction_mode
 
     if st.session_state.bot_running:
         st.markdown("### 🟢 Connection Active")  # static indicator, no flickering
@@ -554,41 +531,40 @@ with tabs[0]:
             if r.status_code == 200:
                 msgs = r.json()
                 if msgs and isinstance(msgs, list):
-                    # Filter out bot messages and AI tags
-                    candidate_msgs = []
                     for msg in msgs:
-                        if str(msg['author']['id']) == str(st.session_state.my_id):
-                            continue
-                        if AI_TAG in msg['content'].strip():
-                            continue
-                        candidate_msgs.append(msg)
+                        msg_id = msg['id']
+                        author_id = str(msg['author']['id'])
+                        content = msg['content'].strip()
 
-                    if candidate_msgs:
-                        # Only consider the newest eligible message
-                        newest_msg = candidate_msgs[0]
-                        msg_id = newest_msg['id']
-                        content = newest_msg['content'].strip()
+                        # --- Skip messages from the bot itself (by ID) ---
+                        if author_id == str(st.session_state.my_id):
+                            continue
 
+                        # --- Skip messages containing the AI tag ---
+                        if AI_TAG in content:
+                            log_to_console(f"⏭️ Skipping message with AI tag: {content[:50]}...")
+                            continue
+
+                        # Skip already processed message IDs
                         if msg_id in st.session_state.processed_msg_ids:
-                            # Already processed; do nothing
-                            pass
-                        else:
-                            # Attempt to reply
-                            success = background_reply(
-                                newest_msg, discord_url, typing_url, headers,
-                                client, st.session_state.system_prompt,
-                                st.session_state.my_id, st.session_state.my_username,
-                                st.session_state.memory_depth, st.session_state.enable_safety,
-                                st.session_state.reaction_delay, st.session_state.resp_delay,
-                                st.session_state.owner_id_input, st.session_state.emoji_pool,
-                                st.session_state.mention_only, st.session_state.model_id,
-                                st.session_state.reaction_mode
-                            )
-                            if success:
-                                st.session_state.processed_msg_ids.add(msg_id)
-                                save_processed_ids(st.session_state.processed_msg_ids)
-                                log_to_console(f"✅ Message {msg_id} processed.")
-                            # If not success, message will be retried next cycle
+                            continue
+
+                        # Attempt to reply
+                        success = background_reply(
+                            msg, discord_url, typing_url, headers,
+                            client, st.session_state.system_prompt,
+                            st.session_state.my_id, st.session_state.my_username,
+                            st.session_state.memory_depth, st.session_state.enable_safety,
+                            st.session_state.reaction_delay, st.session_state.resp_delay,
+                            st.session_state.owner_id_input, st.session_state.emoji_pool,
+                            st.session_state.mention_only, st.session_state.model_id
+                        )
+                        if success:
+                            st.session_state.processed_msg_ids.add(msg_id)
+                            save_processed_ids(st.session_state.processed_msg_ids)
+                            log_to_console(f"✅ Message {msg_id} processed.")
+                        break  # one message per cycle
+
             time.sleep(st.session_state.poll_speed)
             st.rerun()
         except Exception as e:
