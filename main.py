@@ -287,7 +287,7 @@ def safety_filter(text):
 def background_reply(latest, discord_url, typing_url, headers, client, system_prompt,
                      my_id, my_username, memory_depth, enable_safety, reaction_delay,
                      resp_delay, owner_id_input, emoji_pool, mention_only, model_id,
-                     reaction_mode, prefix):
+                     reaction_mode):
     try:
         channel_id = latest['channel_id']
         author_username = latest['author']['username'].lower()
@@ -296,17 +296,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         msg_id = latest['id']
         is_owner = author_id == str(owner_id_input).strip()
 
-        # --- Prefix check ---
-        if prefix:
-            if not content.startswith(prefix):
-                log_to_console(f"⏭️ Message does not start with prefix '{prefix}'. Skipping.")
-                return False
-            # Strip prefix for AI processing
-            content_for_ai = content[len(prefix):].strip()
-        else:
-            content_for_ai = content
-
-        # --- Mention-only check (using original content) ---
+        # --- Mention-only check ---
         if mention_only and not is_owner:
             if f"<@{my_id}>" not in content and f"<@!{my_id}>" not in content:
                 log_to_console("⏭️ Mention-only mode: message does not mention bot. Skipping.")
@@ -337,7 +327,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             log_to_console(f"👍 Reacted with {reaction_emoji}")
 
         long_term_mem = load_memory(channel_id)
-        urls = re.findall(r'(https?://[^\s]+)', content_for_ai)
+        urls = re.findall(r'(https?://[^\s]+)', content)
         url_context = ""
         if urls:
             url_context = f"\n[SYSTEM NOTE: The user provided a link: {urls[0]}. If it's a known site, discuss its likely content.]"
@@ -570,22 +560,33 @@ with tabs[0]:
             if r.status_code == 200:
                 msgs = r.json()
                 if msgs and isinstance(msgs, list):
+                    # Flag to track if we processed (or attempted) a message this cycle
+                    processed_this_cycle = False
+
+                    # Iterate from newest to oldest
                     for msg in msgs:
                         msg_id = msg['id']
                         author_id = str(msg['author']['id'])
                         content = msg['content'].strip()
 
-                        # --- Skip messages from the bot itself (by ID) ---
+                        # Skip messages from the bot itself (by ID)
                         if author_id == str(st.session_state.my_id):
                             continue
 
-                        # --- Skip messages containing the AI tag ---
+                        # Skip messages containing the AI tag
                         if AI_TAG in content:
                             log_to_console(f"⏭️ Skipping message with AI tag: {content[:50]}...")
                             continue
 
                         # Skip already processed message IDs
                         if msg_id in st.session_state.processed_msg_ids:
+                            continue
+
+                        # --- Prefix check (moved here) ---
+                        prefix = st.session_state.prefix
+                        if prefix and not content.startswith(prefix):
+                            log_to_console(f"⏭️ Message does not start with prefix '{prefix}': {content[:30]}...")
+                            # Continue to next message (do not break)
                             continue
 
                         # Attempt to reply
@@ -597,13 +598,17 @@ with tabs[0]:
                             st.session_state.reaction_delay, st.session_state.resp_delay,
                             st.session_state.owner_id_input, st.session_state.emoji_pool,
                             st.session_state.mention_only, st.session_state.model_id,
-                            st.session_state.reaction_mode, st.session_state.prefix
+                            st.session_state.reaction_mode
                         )
                         if success:
                             st.session_state.processed_msg_ids.add(msg_id)
                             save_processed_ids(st.session_state.processed_msg_ids)
                             log_to_console(f"✅ Message {msg_id} processed.")
-                        break  # one message per cycle
+                            processed_this_cycle = True
+                        # After processing (or failing), break so we don't process multiple messages per cycle
+                        break
+
+                    # If no message was processed, we simply wait and loop again
 
             time.sleep(st.session_state.poll_speed)
             st.rerun()
