@@ -560,9 +560,6 @@ with tabs[0]:
             if r.status_code == 200:
                 msgs = r.json()
                 if msgs and isinstance(msgs, list):
-                    # Flag to track if we processed (or attempted) a message this cycle
-                    processed_this_cycle = False
-
                     # Iterate from newest to oldest
                     for msg in msgs:
                         msg_id = msg['id']
@@ -586,8 +583,8 @@ with tabs[0]:
                         prefix = st.session_state.prefix
                         if prefix and not content.startswith(prefix):
                             log_to_console(f"⏭️ Message does not start with prefix '{prefix}': {content[:30]}...")
-                            # Continue to next message (do not break)
-                            continue
+                            # IMPORTANT: Break instead of continue so we do NOT process older messages
+                            break
 
                         # Attempt to reply
                         success = background_reply(
@@ -604,11 +601,8 @@ with tabs[0]:
                             st.session_state.processed_msg_ids.add(msg_id)
                             save_processed_ids(st.session_state.processed_msg_ids)
                             log_to_console(f"✅ Message {msg_id} processed.")
-                            processed_this_cycle = True
                         # After processing (or failing), break so we don't process multiple messages per cycle
                         break
-
-                    # If no message was processed, we simply wait and loop again
 
             time.sleep(st.session_state.poll_speed)
             st.rerun()
