@@ -22,6 +22,9 @@ MODELS_ENDPOINT = f"{NVIDIA_BASE_URL}/models"
 CHAT_ENDPOINT = f"{NVIDIA_BASE_URL}/chat/completions"
 REQUEST_TIMEOUT = 15  # seconds
 
+# Tag that the AI appends to every response
+AI_TAG = "[AI_RESPONSE]"
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -309,7 +312,9 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         if urls:
             url_context = f"\n[SYSTEM NOTE: The user provided a link: {urls[0]}. If it's a known site, discuss its likely content.]"
 
-        chat_history = [{"role": "system", "content": f"PERSONA: {system_prompt}. Current memory: {long_term_mem}. {url_context}"}]
+        # Add tag instruction to system prompt
+        system_instruction = f"{system_prompt}\n\nIMPORTANT: Always end your response with the tag: {AI_TAG}"
+        chat_history = [{"role": "system", "content": f"PERSONA: {system_instruction}. Current memory: {long_term_mem}. {url_context}"}]
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers, timeout=5).json()
 
         if isinstance(context_req, list):
@@ -325,10 +330,8 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             response = client.chat.completions.create(model=model_id, messages=chat_history)
             reply = response.choices[0].message.content
         except openai.RateLimitError as e:
-            # Extract retry_after if available, otherwise default to 60 seconds
             retry_after = getattr(e, 'retry_after', None)
             if retry_after is None:
-                # Try to parse from response body if possible
                 try:
                     body = e.response.json()
                     retry_after = body.get('retry_after', 60)
@@ -338,11 +341,16 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             log_to_console(f"⚠️ NVIDIA rate limit hit. Cooldown until {datetime.fromtimestamp(st.session_state.nvidia_retry_after).strftime('%H:%M:%S')}. Waiting {retry_after}s.")
             return False
         except Exception as e:
-            # Other errors: log and mark as failed (do not retry indefinitely)
             log_to_console(f"❌ NVIDIA API error: {str(e)}")
             st.session_state.debug_log = f"NVIDIA API error: {str(e)}"
             return False
 
+        # Ensure the tag is present at the end of the reply
+        if AI_TAG not in reply:
+            reply = f"{reply.strip()} {AI_TAG}"
+        else:
+            # Optionally, ensure it's at the end
+            reply = reply.strip()
         log_to_console(f"✅ Received AI reply: {reply[:50]}...")
 
         # Now do summary (also rate‑limit protected)
@@ -354,7 +362,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             retry_after = getattr(e, 'retry_after', 60)
             st.session_state.nvidia_retry_after = time.time() + float(retry_after)
             log_to_console(f"⚠️ NVIDIA rate limit during summary. Cooldown set.")
-            # Still send the reply (even if summary fails), but we can continue
         except Exception as e:
             log_to_console(f"⚠️ Memory summary failed: {str(e)}")
 
@@ -529,8 +536,13 @@ with tabs[0]:
                         author_id = str(msg['author']['id'])
                         content = msg['content'].strip()
 
-                        # Skip only if it's our own last AI reply (same ID and same content)
-                        if author_id == str(st.session_state.my_id) and content == st.session_state.get("last_ai_content", ""):
+                        # --- Skip messages from the bot itself (by ID) ---
+                        if author_id == str(st.session_state.my_id):
+                            continue
+
+                        # --- Skip messages containing the AI tag ---
+                        if AI_TAG in content:
+                            log_to_console(f"⏭️ Skipping message with AI tag: {content[:50]}...")
                             continue
 
                         # Skip already processed message IDs
@@ -551,7 +563,6 @@ with tabs[0]:
                             st.session_state.processed_msg_ids.add(msg_id)
                             save_processed_ids(st.session_state.processed_msg_ids)
                             log_to_console(f"✅ Message {msg_id} processed.")
-                        # If not success, message will be retried after cooldown if applicable
                         break  # one message per cycle
 
             time.sleep(st.session_state.poll_speed)
