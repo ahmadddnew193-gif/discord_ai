@@ -25,6 +25,13 @@ REQUEST_TIMEOUT = 15  # seconds
 # Tag that the AI appends to every response
 AI_TAG = "[AI_RESPONSE]"
 
+# Default emoji list for AI Random mode
+AI_RANDOM_EMOJIS = [
+    "😀", "😂", "🤣", "😊", "😍", "🤔", "😎", "👍", "👎", "🙏",
+    "🎉", "✨", "🔥", "💯", "✅", "❌", "💬", "👑", "🤖", "🧠",
+    "🚀", "⭐", "🌟", "💡", "📌", "🎯", "💎", "🍕", "🎵", "❤️"
+]
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -170,6 +177,8 @@ for s_key, s_val in {
     "channel_id": "",
     "model_id": "",
     "nvidia_retry_after": 0,          # timestamp until which NVIDIA API should not be called
+    "reaction_mode": "Custom Pool",   # default reaction mode
+    "prefix": "",                     # prefix trigger (empty = respond to all)
 }.items():
     if s_key not in st.session_state:
         st.session_state[s_key] = s_val
@@ -277,7 +286,8 @@ def safety_filter(text):
 
 def background_reply(latest, discord_url, typing_url, headers, client, system_prompt,
                      my_id, my_username, memory_depth, enable_safety, reaction_delay,
-                     resp_delay, owner_id_input, emoji_pool, mention_only, model_id):
+                     resp_delay, owner_id_input, emoji_pool, mention_only, model_id,
+                     reaction_mode, prefix):
     try:
         channel_id = latest['channel_id']
         author_username = latest['author']['username'].lower()
@@ -286,8 +296,20 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         msg_id = latest['id']
         is_owner = author_id == str(owner_id_input).strip()
 
+        # --- Prefix check ---
+        if prefix:
+            if not content.startswith(prefix):
+                log_to_console(f"⏭️ Message does not start with prefix '{prefix}'. Skipping.")
+                return False
+            # Strip prefix for AI processing
+            content_for_ai = content[len(prefix):].strip()
+        else:
+            content_for_ai = content
+
+        # --- Mention-only check (using original content) ---
         if mention_only and not is_owner:
             if f"<@{my_id}>" not in content and f"<@!{my_id}>" not in content:
+                log_to_console("⏭️ Mention-only mode: message does not mention bot. Skipping.")
                 return False
 
         # Check if we are in NVIDIA rate‑limit cooldown
@@ -297,17 +319,25 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
 
         requests.post(typing_url, headers=headers, timeout=5)
 
-        if emoji_pool:
-            reaction_emoji = random.choice(emoji_pool)
-        else:
-            reaction_emoji = "👑" if is_owner else "💬"
+        # --- Reaction logic ---
+        if reaction_mode == "Custom Pool":
+            if emoji_pool:
+                reaction_emoji = random.choice(emoji_pool)
+            else:
+                reaction_emoji = "👑" if is_owner else "💬"
+        elif reaction_mode == "AI Random":
+            reaction_emoji = random.choice(AI_RANDOM_EMOJIS)
+        else:  # Off
+            reaction_emoji = None
 
-        if reaction_delay > 0 and not is_owner:
-            time.sleep(reaction_delay)
-        add_reaction(channel_id, msg_id, reaction_emoji, headers)
+        if reaction_emoji:
+            if reaction_delay > 0 and not is_owner:
+                time.sleep(reaction_delay)
+            add_reaction(channel_id, msg_id, reaction_emoji, headers)
+            log_to_console(f"👍 Reacted with {reaction_emoji}")
 
         long_term_mem = load_memory(channel_id)
-        urls = re.findall(r'(https?://[^\s]+)', content)
+        urls = re.findall(r'(https?://[^\s]+)', content_for_ai)
         url_context = ""
         if urls:
             url_context = f"\n[SYSTEM NOTE: The user provided a link: {urls[0]}. If it's a known site, discuss its likely content.]"
@@ -349,7 +379,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         if AI_TAG not in reply:
             reply = f"{reply.strip()} {AI_TAG}"
         else:
-            # Optionally, ensure it's at the end
             reply = reply.strip()
         log_to_console(f"✅ Received AI reply: {reply[:50]}...")
 
@@ -414,6 +443,16 @@ with st.sidebar:
     st.header("⚙️ Bot Settings")
     mention_only = st.toggle("Mention-Only Mode (429 Protection)", value=False)
     st.session_state.mention_only = mention_only
+
+    # --- New: Prefix trigger ---
+    prefix_input = st.text_input("Prefix Trigger (optional)", value=st.session_state.get("prefix", ""),
+                                 help="e.g., /ai. Leave empty to respond to all messages.")
+    st.session_state.prefix = prefix_input.strip()
+
+    # --- New: Reaction mode ---
+    reaction_mode = st.selectbox("Reaction Mode", ["Off", "Custom Pool", "AI Random"],
+                                 index=1 if st.session_state.get("reaction_mode", "Custom Pool") == "Custom Pool" else 0)
+    st.session_state.reaction_mode = reaction_mode
 
     if st.session_state.bot_running:
         st.markdown("### 🟢 Connection Active")  # static indicator, no flickering
@@ -557,7 +596,8 @@ with tabs[0]:
                             st.session_state.memory_depth, st.session_state.enable_safety,
                             st.session_state.reaction_delay, st.session_state.resp_delay,
                             st.session_state.owner_id_input, st.session_state.emoji_pool,
-                            st.session_state.mention_only, st.session_state.model_id
+                            st.session_state.mention_only, st.session_state.model_id,
+                            st.session_state.reaction_mode, st.session_state.prefix
                         )
                         if success:
                             st.session_state.processed_msg_ids.add(msg_id)
