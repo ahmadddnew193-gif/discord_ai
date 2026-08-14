@@ -178,7 +178,6 @@ for s_key, s_val in {
     "model_id": "",
     "nvidia_retry_after": 0,          # timestamp until which NVIDIA API should not be called
     "reaction_mode": "Custom Pool",   # default reaction mode
-    "prefix": "",                     # prefix trigger (empty = respond to all)
 }.items():
     if s_key not in st.session_state:
         st.session_state[s_key] = s_val
@@ -434,14 +433,9 @@ with st.sidebar:
     mention_only = st.toggle("Mention-Only Mode (429 Protection)", value=False)
     st.session_state.mention_only = mention_only
 
-    # --- New: Prefix trigger ---
-    prefix_input = st.text_input("Prefix Trigger (optional)", value=st.session_state.get("prefix", ""),
-                                 help="e.g., /ai. Leave empty to respond to all messages.")
-    st.session_state.prefix = prefix_input.strip()
-
-    # --- New: Reaction mode ---
+    # --- Reaction mode ---
     reaction_mode = st.selectbox("Reaction Mode", ["Off", "Custom Pool", "AI Random"],
-                                 index=1 if st.session_state.get("reaction_mode", "Custom Pool") == "Custom Pool" else 0)
+                                 index=1)  # Default to Custom Pool
     st.session_state.reaction_mode = reaction_mode
 
     if st.session_state.bot_running:
@@ -579,29 +573,22 @@ with tabs[0]:
                             # Already processed; do nothing
                             pass
                         else:
-                            prefix = st.session_state.prefix
-                            if prefix and not content.startswith(prefix):
-                                # Log once, then mark as processed to avoid re-checking
-                                log_to_console(f"⏭️ Message does not start with prefix '{prefix}': {content[:30]}...")
+                            # Attempt to reply
+                            success = background_reply(
+                                newest_msg, discord_url, typing_url, headers,
+                                client, st.session_state.system_prompt,
+                                st.session_state.my_id, st.session_state.my_username,
+                                st.session_state.memory_depth, st.session_state.enable_safety,
+                                st.session_state.reaction_delay, st.session_state.resp_delay,
+                                st.session_state.owner_id_input, st.session_state.emoji_pool,
+                                st.session_state.mention_only, st.session_state.model_id,
+                                st.session_state.reaction_mode
+                            )
+                            if success:
                                 st.session_state.processed_msg_ids.add(msg_id)
                                 save_processed_ids(st.session_state.processed_msg_ids)
-                            else:
-                                # Attempt to reply
-                                success = background_reply(
-                                    newest_msg, discord_url, typing_url, headers,
-                                    client, st.session_state.system_prompt,
-                                    st.session_state.my_id, st.session_state.my_username,
-                                    st.session_state.memory_depth, st.session_state.enable_safety,
-                                    st.session_state.reaction_delay, st.session_state.resp_delay,
-                                    st.session_state.owner_id_input, st.session_state.emoji_pool,
-                                    st.session_state.mention_only, st.session_state.model_id,
-                                    st.session_state.reaction_mode
-                                )
-                                if success:
-                                    st.session_state.processed_msg_ids.add(msg_id)
-                                    save_processed_ids(st.session_state.processed_msg_ids)
-                                    log_to_console(f"✅ Message {msg_id} processed.")
-                                # If not success, message will be retried next cycle (unless rate limited, etc.)
+                                log_to_console(f"✅ Message {msg_id} processed.")
+                            # If not success, message will be retried next cycle
             time.sleep(st.session_state.poll_speed)
             st.rerun()
         except Exception as e:
