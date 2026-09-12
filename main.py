@@ -12,6 +12,7 @@ import re
 from duckduckgo_search import DDGS
 import logging
 from typing import Optional
+import base64
 
 # --------------------------------------------------------------------------
 # Config
@@ -170,6 +171,11 @@ for s_key, s_val in {
     "channel_id": "",
     "model_id": "",
     "nvidia_retry_after": 0,          # timestamp until which NVIDIA API should not be called
+    # new keys for badge spoofer / invites
+    "cf_clearance_cookie": "",
+    "analytics_token": None,
+    "spoofer_running": False,
+    "friend_invites": [],
 }.items():
     if s_key not in st.session_state:
         st.session_state[s_key] = s_val
@@ -270,6 +276,124 @@ def safety_filter(text):
             return False
     return True
 
+# --- NEW: Badge Spoofer helpers ---
+def _build_super_properties():
+    """Build a valid X-Super-Properties header for analytics requests."""
+    props = {
+        "os": "Windows",
+        "browser": "Chrome",
+        "device": "",
+        "system_locale": "en-US",
+        "browser_user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "browser_version": "120.0.0.0",
+        "os_version": "10",
+        "referrer": "",
+        "referring_domain": "",
+        "referrer_current": "",
+        "referring_domain_current": "",
+        "release_channel": "stable",
+        "client_build_number": 254000,
+        "client_event_source": None,
+    }
+    raw = json.dumps(props, separators=(",", ":")).encode("utf-8")
+    return base64.b64encode(raw).decode("utf-8")
+
+def fetch_analytics_token(token):
+    """Fetch the analytics token required for /science calls."""
+    headers = get_headers(token)
+    headers["X-Super-Properties"] = _build_super_properties()
+    try:
+        r = requests.get(
+            "https://discord.com/api/v9/users/@me?with_analytics_token=true",
+            headers=headers,
+            timeout=8,
+        )
+        if r.status_code == 200:
+            return r.json().get("analytics_token")
+    except:
+        pass
+    return None
+
+def post_science_events(token, analytics_token, cookie, events):
+    """
+    POST events to Discord's /science endpoint.
+    cookie is the raw cf_clearance value (or full cookie string).
+    Returns (status_code, response_text).
+    """
+    headers = {
+        "Authorization": token,
+        "Content-Type": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "X-Super-Properties": _build_super_properties(),
+        "Origin": "https://discord.com",
+        "Referer": "https://discord.com/channels/@me",
+    }
+    if cookie:
+        # Allow either a raw value or full cookie string
+        if "cf_clearance=" in cookie:
+            headers["Cookie"] = cookie
+        else:
+            headers["Cookie"] = f"cf_clearance={cookie}"
+
+    payload = {
+        "token": analytics_token,
+        "events": events,
+    }
+    try:
+        r = requests.post(
+            "https://discord.com/api/v9/science",
+            headers=headers,
+            json=payload,
+            timeout=15,
+        )
+        return r.status_code, r.text
+    except Exception as e:
+        return 0, str(e)
+
+def build_game_events(game_name, hours, game_id="0"):
+    """Build a launch_game + running_game_heartbeat event pair for a fake game session."""
+    total_seconds = int(hours * 3600)
+    launch_id = str(random.randint(10**17, 10**18 - 1))
+    session_id = str(random.randint(10**17, 10**18 - 1))
+
+    launch_event = {
+        "type": "launch_game",
+        "game": {
+            "id": game_id,
+            "name": game_name,
+            "executable": game_name.lower().replace(" ", "_") + ".exe",
+        },
+        "properties": {
+            "client_launch_id": launch_id,
+            "launch_platform": "desktop",
+            "game_id": game_id,
+            "game_name": game_name,
+            "exe": game_name.lower().replace(" ", "_") + ".exe",
+            "is_overlay": False,
+            "launch_source": "desktop",
+            "playtime_session_id": session_id,
+        },
+    }
+
+    heartbeat_event = {
+        "type": "running_game_heartbeat",
+        "game": {
+            "id": game_id,
+            "name": game_name,
+        },
+        "properties": {
+            "client_launch_id": launch_id,
+            "game_id": game_id,
+            "game_name": game_name,
+            "heartbeat_session_id": session_id,
+            "playtime_seconds": total_seconds,
+            "running_game_heartbeat_ms": total_seconds * 1000,
+        },
+    }
+
+    return [launch_event, heartbeat_event]
+
+# --- Background reply logic (unchanged) ---
 def background_reply(latest, discord_url, typing_url, headers, client, system_prompt,
                      my_id, my_username, memory_depth, enable_safety, resp_delay,
                      owner_id_input, mention_only, model_id):
@@ -285,7 +409,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             if f"<@{my_id}>" not in content and f"<@!{my_id}>" not in content:
                 return False
 
-        # Check NVIDIA rate‑limit cooldown
         if time.time() < st.session_state.nvidia_retry_after:
             log_to_console(f"⏳ Rate‑limit cooldown until {datetime.fromtimestamp(st.session_state.nvidia_retry_after).strftime('%H:%M:%S')}. Skipping message.")
             return False
@@ -298,7 +421,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         if urls:
             url_context = f"\n[SYSTEM NOTE: The user provided a link: {urls[0]}. If it's a known site, discuss its likely content.]"
 
-        # Add tag instruction to system prompt
         system_instruction = f"{system_prompt}\n\nIMPORTANT: Always end your response with the tag: {AI_TAG}"
         chat_history = [{"role": "system", "content": f"PERSONA: {system_instruction}. Current memory: {long_term_mem}. {url_context}"}]
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers, timeout=5).json()
@@ -311,7 +433,6 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
 
         log_to_console(f"📡 Sending request to NVIDIA model: {model_id}")
 
-        # --- Call NVIDIA API with rate‑limit handling ---
         try:
             response = client.chat.completions.create(model=model_id, messages=chat_history)
             reply = response.choices[0].message.content
@@ -331,20 +452,16 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             st.session_state.debug_log = f"NVIDIA API error: {str(e)}"
             return False
 
-        # --- Truncate to Discord's 2000‑character limit ---
         MAX_MSG_LEN = 2000
         TAG_LEN = len(AI_TAG)
         if AI_TAG not in reply:
-            # Append tag, leaving room for it
-            max_content_len = MAX_MSG_LEN - TAG_LEN - 1  # -1 for space
+            max_content_len = MAX_MSG_LEN - TAG_LEN - 1
             reply = reply.strip()[:max_content_len] + " " + AI_TAG
         else:
-            # Tag already there, just truncate overall to 2000
             reply = reply.strip()[:MAX_MSG_LEN]
 
         log_to_console(f"✅ Received AI reply (length={len(reply)}): {reply[:50]}...")
 
-        # Summary (unchanged)
         new_summary_prompt = f"Summarize key points in 2 sentences: {reply}"
         try:
             summary_resp = client.chat.completions.create(model=model_id, messages=[{"role": "user", "content": new_summary_prompt}])
@@ -411,7 +528,6 @@ with st.sidebar:
 
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
     st.session_state.memory_depth = memory_depth
-    # Reduced default polling frequency to 0.5 seconds
     poll_speed = st.slider("Polling Frequency (Seconds)", 0.1, 5.0, 0.5)
     st.session_state.poll_speed = poll_speed
     resp_delay = st.slider("Response Delay (Seconds)", 0.0, 5.0, 0.0)
@@ -424,14 +540,15 @@ with st.sidebar:
     with c_restart:
         auto_restart_10m = st.toggle("10m Auto-Restart", value=False)
 
-# --- Tabs ---
+# --- Tabs (two new appended) ---
 tabs_list = [
     "🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester",
     "💎 Free Emoji", "❄️ Snowflake Decoder", "📱 App Hunter", "🎙️ VC Lurker",
     "🔊 Soundboard Spoofer", "✨ Hypesquad", "🔍 Account Audit", "📢 Webhook Commander",
     "👻 Message Ghoster", "🎨 Text Color", "⏳ Infinite Typing", "🔎 OSINT Search",
     "🎭 Status Spoofer", "🖼️ Sticker Spoofer", "📦 Large File Bridge", "👻 Invisible Identity",
-    "🌀 Bio Animator", "👻 Ghost Pinger", "📋 Server Cloner", "💎 Nitro Badge", "🎬 2D Animator"
+    "🌀 Bio Animator", "👻 Ghost Pinger", "📋 Server Cloner", "💎 Nitro Badge", "🎬 2D Animator",
+    "💠 Badge Spoofer", "🤝 Friend Invites"
 ]
 tabs = st.tabs(tabs_list)
 
@@ -439,7 +556,6 @@ tabs = st.tabs(tabs_list)
 with tabs[0]:
     st.header("🤖 Bot Control")
 
-    # Model ID
     model_id = st.text_input("Model ID", key="model_id_input")
     if model_id:
         st.session_state.model_id = model_id.strip()
@@ -468,14 +584,12 @@ with tabs[0]:
     blacklisted_users = [u.strip().lower() for u in blacklisted_users_input.split(",") if u.strip()]
     blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
 
-    # Create OpenAI client if API key is available
     if st.session_state.or_key:
         client = openai.OpenAI(api_key=st.session_state.or_key, base_url=NVIDIA_BASE_URL)
     else:
         client = None
         st.warning("⚠️ Please enter your NVIDIA API Key in the sidebar.")
 
-    # Fetch models (cached)
     @st.cache_data(ttl=3600, show_spinner=False)
     def get_cached_models(api_key):
         try:
@@ -522,20 +636,16 @@ with tabs[0]:
                         author_id = str(msg['author']['id'])
                         content = msg['content'].strip()
 
-                        # Skip messages from the bot itself
                         if author_id == str(st.session_state.my_id):
                             continue
 
-                        # Skip any message containing the AI tag
                         if AI_TAG in content:
                             log_to_console(f"⏭️ Skipping message with AI tag: {content[:50]}...")
                             continue
 
-                        # Skip already processed
                         if msg_id in st.session_state.processed_msg_ids:
                             continue
 
-                        # Process the message
                         success = background_reply(
                             msg, discord_url, typing_url, headers,
                             client, st.session_state.system_prompt,
@@ -549,7 +659,6 @@ with tabs[0]:
                             st.session_state.processed_msg_ids.add(msg_id)
                             save_processed_ids(st.session_state.processed_msg_ids)
                             log_to_console(f"✅ Message {msg_id} processed.")
-                        # Process only one message per polling cycle
                         break
 
             time.sleep(st.session_state.poll_speed)
@@ -561,7 +670,6 @@ with tabs[0]:
     else:
         st.info("Bot is stopped.")
 
-# ============ ALL OTHER TABS (unchanged from original) ============
 # Tab 2: History Scraper
 with tabs[1]:
     st.header("📥 Channel History Scraper")
@@ -1093,6 +1201,193 @@ with tabs[24]:
                     st.error(f"Failed to initialize parent node container: {init_post.text}")
             except Exception as stream_err:
                 st.error(f"Streaming anomaly detected: {str(stream_err)}")
+
+# ================= TAB 26: BADGE SPOOFER (NEW) =================
+with tabs[25]:
+    st.header("💠 Badge Spoofer — Analytics `/science` Vector")
+    st.caption("Injects fake game-play events into Discord's analytics endpoint. Profile badges update in 1–2 days. Requires `cf_clearance` cookie from a browser logged into the same account.")
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        cookie_input = st.text_input(
+            "cf_clearance Cookie Value",
+            type="password",
+            value=st.session_state.cf_clearance_cookie,
+            key="cf_clearance_input",
+            help="Grab from browser devtools after visiting discord.com. Paste full 'cf_clearance=...' or just the value.",
+        )
+        if cookie_input:
+            st.session_state.cf_clearance_cookie = cookie_input.strip()
+        fetch_token_btn = st.button("🔑 Fetch Analytics Token", use_container_width=True)
+    with col_b:
+        st.markdown("**Token status:**")
+        if st.session_state.analytics_token:
+            st.success("Analytics token loaded.")
+        else:
+            st.info("Not fetched yet.")
+        if st.button("🗑️ Clear Analytics Token", use_container_width=True):
+            st.session_state.analytics_token = None
+            st.success("Token cleared.")
+
+    if fetch_token_btn:
+        if not st.session_state.discord_token:
+            st.error("Discord token required (sidebar).")
+        else:
+            tok = fetch_analytics_token(st.session_state.discord_token)
+            if tok:
+                st.session_state.analytics_token = tok
+                log_to_console("💠 Analytics token acquired from /users/@me.")
+                st.success("Analytics token fetched.")
+                st.rerun()
+            else:
+                st.error("Failed to fetch analytics token. Check token validity.")
+                log_to_console("❌ Analytics token fetch failed.")
+
+    st.divider()
+    st.subheader("🎮 Fake Game Sessions")
+
+    game_rows = st.text_area(
+        "Game Sessions (one per line, format: `Game Name | hours`)",
+        value="Grand Theft Auto V | 12\nApex Legends | 8\nMinecraft | 24",
+        height=120,
+    )
+
+    col_send, col_stop = st.columns(2)
+    with col_send:
+        start_spoof = st.button("🚀 Fire Game Events", use_container_width=True)
+    with col_stop:
+        if st.button("🧹 Reset Session State", use_container_width=True):
+            st.session_state.spoofer_running = False
+            log_to_console("💠 Spoofer session state reset.")
+            st.success("Reset.")
+
+    if start_spoof:
+        if not st.session_state.discord_token:
+            st.error("Discord token required.")
+        elif not st.session_state.analytics_token:
+            st.error("Fetch the analytics token first.")
+        elif not st.session_state.cf_clearance_cookie:
+            st.error("cf_clearance cookie required.")
+        else:
+            parsed_sessions = []
+            for line in game_rows.split("\n"):
+                line = line.strip()
+                if not line or "|" not in line:
+                    continue
+                parts = [p.strip() for p in line.split("|")]
+                if len(parts) < 2:
+                    continue
+                name = parts[0]
+                try:
+                    hours = float(parts[1])
+                except ValueError:
+                    continue
+                parsed_sessions.append((name, hours))
+
+            if not parsed_sessions:
+                st.error("No valid `Game Name | hours` entries parsed.")
+            else:
+                st.session_state.spoofer_running = True
+                progress = st.progress(0.0)
+                status_box = st.empty()
+                success_count = 0
+                fail_count = 0
+
+                for idx, (name, hours) in enumerate(parsed_sessions):
+                    status_box.info(f"Injecting session: **{name}** ({hours}h)")
+                    events = build_game_events(name, hours)
+                    code, body = post_science_events(
+                        st.session_state.discord_token,
+                        st.session_state.analytics_token,
+                        st.session_state.cf_clearance_cookie,
+                        events,
+                    )
+                    if code in (200, 204):
+                        success_count += 1
+                        log_to_console(f"💠 {name}: {code} accepted ({hours}h logged).")
+                    else:
+                        fail_count += 1
+                        log_to_console(f"❌ {name}: {code} — {body[:120]}")
+                    progress.progress((idx + 1) / len(parsed_sessions))
+                    time.sleep(0.6)
+
+                st.session_state.spoofer_running = False
+                if fail_count == 0:
+                    st.success(f"All {success_count} sessions accepted. Badges update in 1–2 days.")
+                else:
+                    st.warning(f"{success_count} accepted, {fail_count} failed. Check console for codes.")
+                status_box.empty()
+
+    st.divider()
+    with st.expander("ℹ️ How this works / requirements"):
+        st.markdown(
+            """
+- Discord tracks playtime via `launch_game` and `running_game_heartbeat` analytics events.
+- This tab sends the same events the desktop client would, with custom hours and game names.
+- **Required:** account token, `cf_clearance` cookie (Cloudflare clearance), and a fresh analytics token.
+- The cookie expires periodically — if you get `403`, re-capture it from your browser.
+- **Do not spam.** One pass per game is enough. Multiple rapid passes can trigger rate limits.
+- Badges appear under `Profile → Games` in 1–2 days.
+            """
+        )
+
+# ================= TAB 27: FRIEND INVITES (NEW) =================
+with tabs[26]:
+    st.header("🤝 Friend Invite Generator")
+    st.caption("Generates `discord.gg/...` links that add the clicker as a friend when used. No mutual server required.")
+
+    count_input = st.number_input("How many invites to generate?", min_value=1, max_value=20, value=1)
+    if st.button("✨ Generate Friend Invites", use_container_width=True):
+        if not st.session_state.discord_token:
+            st.error("Discord token required.")
+        else:
+            h = get_headers(st.session_state.discord_token)
+            generated = []
+            for i in range(int(count_input)):
+                try:
+                    r = requests.post(
+                        "https://discord.com/api/v9/users/@me/invites",
+                        headers=h,
+                        json={},
+                        timeout=8,
+                    )
+                    if r.status_code in (200, 201):
+                        code = r.json().get("code") or r.json().get("invite", {}).get("code")
+                        if code:
+                            generated.append(code)
+                            log_to_console(f"🤝 Friend invite generated: discord.gg/{code}")
+                    else:
+                        log_to_console(f"❌ Friend invite failed: {r.status_code} — {r.text[:120]}")
+                        st.error(f"Request {i+1} failed: {r.status_code}")
+                        break
+                    time.sleep(0.8)
+                except Exception as e:
+                    log_to_console(f"❌ Friend invite exception: {e}")
+                    st.error(f"Request {i+1} errored: {e}")
+                    break
+
+            if generated:
+                st.session_state.friend_invites = generated
+                st.success(f"Generated {len(generated)} invite(s).")
+                for code in generated:
+                    st.code(f"https://discord.gg/{code}", language="text")
+
+    if st.session_state.friend_invites:
+        st.divider()
+        st.subheader("📋 Previously Generated (this session)")
+        for code in st.session_state.friend_invites:
+            st.code(f"https://discord.gg/{code}", language="text")
+
+    with st.expander("ℹ️ How this works"):
+        st.markdown(
+            """
+- `POST /users/@me/invites` returns a one-use friend link.
+- Anyone who clicks it while logged in is added as a friend to your account.
+- No mutual server is required — that's why this is useful.
+- Rate-limited. Don't spam. Discord silently drops after a few in quick succession.
+- Links are single-use by default. Generate a new one per person.
+            """
+        )
 
 # --- Real-time console ---
 st.divider()
