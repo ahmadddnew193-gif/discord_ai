@@ -14,30 +14,22 @@ import logging
 from typing import Optional
 import base64
 
-# --------------------------------------------------------------------------
-# Config
-# --------------------------------------------------------------------------
-
 NVIDIA_BASE_URL = "https://integrate.api.nvidia.com/v1"
 MODELS_ENDPOINT = f"{NVIDIA_BASE_URL}/models"
 CHAT_ENDPOINT = f"{NVIDIA_BASE_URL}/chat/completions"
-REQUEST_TIMEOUT = 15  # seconds
-
-# Tag that the AI appends to every response
+REQUEST_TIMEOUT = 15
 AI_TAG = "[AI_RESPONSE]"
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("nvidia_model_picker")
 st.set_page_config(page_title="Discord AI Control Panel", page_icon="🛡️", layout="wide")
 
-# --- SECURE LOGIN SYSTEM ---
-MASTER_KEY = st.secrets.get("MASTER_KEY", "CHANGEME")
+MASTER_KEY = st.secrets.get("MASTER_KEY")
 CODE_FILE = "active_code.txt"
 MEMORY_FILE = "conversation_memory.json"
 PROCESSED_MSG_FILE = "processed_messages.json"
+CLIENTS_FILE = "clients.json"
+
 
 def load_processed_ids():
     if os.path.exists(PROCESSED_MSG_FILE):
@@ -50,6 +42,7 @@ def load_processed_ids():
             pass
     return set()
 
+
 def save_processed_ids(id_set):
     try:
         with open(PROCESSED_MSG_FILE, "w") as f:
@@ -57,58 +50,52 @@ def save_processed_ids(id_set):
     except Exception as e:
         log_to_console(f"⚠️ Could not save processed IDs: {e}")
 
-def fetch_nvidia_models(api_key: str, timeout: int = REQUEST_TIMEOUT) -> list[dict]:
+
+def load_clients():
+    if os.path.exists(CLIENTS_FILE):
+        try:
+            with open(CLIENTS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            pass
+    return {}
+
+
+def save_clients(clients):
+    with open(CLIENTS_FILE, "w") as f:
+        json.dump(clients, f, indent=2)
+
+
+def fetch_nvidia_models(api_key, timeout=REQUEST_TIMEOUT):
     if not api_key or not api_key.strip():
         raise ValueError("An NVIDIA API key is required to fetch models.")
-    headers = {
-        "Authorization": f"Bearer {api_key.strip()}",
-        "Accept": "application/json",
-    }
+    headers = {"Authorization": f"Bearer {api_key.strip()}", "Accept": "application/json"}
     logger.info("Fetching model list from %s", MODELS_ENDPOINT)
     try:
         response = requests.get(MODELS_ENDPOINT, headers=headers, timeout=timeout)
     except requests.exceptions.Timeout as exc:
-        logger.error("Request to NVIDIA API timed out after %ss", timeout)
-        raise requests.exceptions.Timeout(
-            f"Timed out after {timeout}s contacting {MODELS_ENDPOINT}"
-        ) from exc
-    except requests.exceptions.ConnectionError as exc:
-        logger.error("Connection error contacting NVIDIA API: %s", exc)
-        raise
+        raise requests.exceptions.Timeout(f"Timed out after {timeout}s contacting {MODELS_ENDPOINT}") from exc
     if response.status_code == 401:
-        logger.error("NVIDIA API returned 401 Unauthorized — invalid API key.")
-        raise requests.exceptions.HTTPError(
-            "401 Unauthorized: check that your NVIDIA API key is valid.",
-            response=response,
-        )
+        raise requests.exceptions.HTTPError("401 Unauthorized: check that your NVIDIA API key is valid.", response=response)
     if response.status_code == 429:
-        logger.error("NVIDIA API rate limit hit (429).")
-        raise requests.exceptions.HTTPError(
-            "429 Too Many Requests: you've hit the free-tier rate limit. Wait and retry.",
-            response=response,
-        )
+        raise requests.exceptions.HTTPError("429 Too Many Requests: you've hit the free-tier rate limit. Wait and retry.", response=response)
     if response.status_code == 402:
-        logger.error("NVIDIA API returned 402 — credits/quota exhausted.")
-        raise requests.exceptions.HTTPError(
-            "402 Payment Required: free credits/quota exhausted for this key.",
-            response=response,
-        )
+        raise requests.exceptions.HTTPError("402 Payment Required: free credits/quota exhausted for this key.", response=response)
     response.raise_for_status()
     try:
         payload = response.json()
     except ValueError as exc:
-        logger.error("Failed to parse JSON from NVIDIA API response.")
         raise ValueError("NVIDIA API did not return valid JSON.") from exc
     models = payload.get("data", [])
     if not isinstance(models, list):
         raise ValueError("Unexpected response shape from NVIDIA API: 'data' is not a list.")
-    models_sorted = sorted(models, key=lambda m: m.get("id", ""))
-    logger.info("Fetched %d models", len(models_sorted))
-    return models_sorted
+    return sorted(models, key=lambda m: m.get("id", ""))
+
 
 def set_global_code(code):
     with open(CODE_FILE, "w") as f:
         f.write(f"{code},{time.time()}")
+
 
 def get_global_code():
     if os.path.exists(CODE_FILE):
@@ -121,9 +108,11 @@ def get_global_code():
             return None, None
     return None, None
 
+
 def log_access_event():
     with open("access_log.txt", "a") as f:
         f.write(f"Access Granted at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+
 
 def save_memory(channel_id, summary):
     memory_data = {}
@@ -131,10 +120,12 @@ def save_memory(channel_id, summary):
         with open(MEMORY_FILE, "r") as f:
             try:
                 memory_data = json.load(f)
-            except: pass
+            except:
+                pass
     memory_data[str(channel_id)] = {"summary": summary, "last_updated": time.time()}
     with open(MEMORY_FILE, "w") as f:
         json.dump(memory_data, f)
+
 
 def load_memory(channel_id):
     if os.path.exists(MEMORY_FILE):
@@ -142,10 +133,11 @@ def load_memory(channel_id):
             try:
                 memory_data = json.load(f)
                 return memory_data.get(str(channel_id), {}).get("summary", "No previous memory.")
-            except: pass
+            except:
+                pass
     return "No previous memory."
 
-# --- Initialize session state ---
+
 for s_key, s_val in {
     "access_granted": False,
     "console_logs": ["🤖 System Initialized. Awaiting credentials..."],
@@ -165,33 +157,42 @@ for s_key, s_val in {
     "my_id": None,
     "my_username": None,
     "processed_msg_ids": load_processed_ids(),
-    # new keys for tab1
     "or_key": "",
     "discord_token": "",
     "channel_id": "",
     "model_id": "",
-    "nvidia_retry_after": 0,          # timestamp until which NVIDIA API should not be called
-    # new keys for badge spoofer / invites
+    "nvidia_retry_after": 0,
     "cf_clearance_cookie": "",
     "analytics_token": None,
     "spoofer_running": False,
     "friend_invites": [],
+    "spoofer_fingerprint": "",
+    "steam_acf_output": "",
+    "token_check_results": [],
+    "guild_scrape_result": None,
+    "vanity_sniper_target": "",
+    "vanity_sniper_running": False,
+    "nitro_sniper_running": False,
+    "logged_messages": [],
+    "backup_data": None,
+    "join_results": [],
+    "clients": load_clients(),
+    "client_key_input": "",
 }.items():
     if s_key not in st.session_state:
         st.session_state[s_key] = s_val
 
+
 def log_to_console(message):
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
-    log_entry = f"[{timestamp}] {message}"
-    st.session_state.console_logs.append(log_entry)
+    st.session_state.console_logs.append(f"[{timestamp}] {message}")
     if len(st.session_state.console_logs) > 40:
         st.session_state.console_logs.pop(0)
 
-# --- Secure Login ---
+
 shared_code, shared_time = get_global_code()
 if not shared_code:
     st.session_state.access_granted = False
-
 if shared_code and shared_time:
     if st.session_state.access_granted:
         if time.time() - shared_time > 30:
@@ -204,7 +205,7 @@ if shared_code and shared_time:
 
 with st.sidebar:
     st.header("🔐 System Access")
-    admin_input = st.text_input("Owner Master Key", type="password", help="Only the owner uses this to generate the session code.")
+    admin_input = st.text_input("Owner Master Key", type="password")
     if admin_input == MASTER_KEY:
         col_gen, col_rev = st.columns(2)
         with col_gen:
@@ -212,13 +213,13 @@ with st.sidebar:
                 new_code = str(random.randint(100000, 999999))
                 set_global_code(new_code)
                 st.success(f"CODE: {new_code}")
-                log_to_console(f"🎟️ Owner generated new access key code token.")
+                log_to_console("🎟️ Owner generated new access key code token.")
         with col_rev:
             if st.button("🚫 Revoke All"):
                 if os.path.exists(CODE_FILE):
                     os.remove(CODE_FILE)
                 st.session_state.access_granted = False
-                log_to_console("🛑 Master revocation activated. All terminals locked.")
+                log_to_console("🛑 Master revocation activated.")
                 st.warning("Access Revoked")
                 st.rerun()
     st.divider()
@@ -229,27 +230,29 @@ with st.sidebar:
             if current_valid_code and user_code_attempt == current_valid_code:
                 st.session_state.access_granted = True
                 log_access_event()
-                log_to_console("🔓 Access code accepted. Dashboard environment unlocked.")
+                log_to_console("🔓 Access code accepted.")
                 st.rerun()
             else:
                 st.error("Invalid or Expired Code")
-                log_to_console("❌ Unauthorized connection attempt with invalid access key.")
+                log_to_console("❌ Unauthorized connection attempt.")
 
 if not st.session_state.access_granted:
     st.title("🛡️ System Dashboard - Locked")
     st.info("Please contact the administrator for the current global 6-digit access code.")
     st.stop()
 
-# --- Helper functions ---
+
 def jitter_delay(min_s=0.1, max_s=0.5):
     time.sleep(random.uniform(min_s, max_s))
+
 
 def get_headers(tk):
     return {
         "Authorization": tk,
         "Content-Type": "application/json",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
     }
+
 
 def log_to_csv(author, content, action):
     file_exists = os.path.isfile('discord_audit_log.csv')
@@ -258,6 +261,7 @@ def log_to_csv(author, content, action):
         if not file_exists:
             writer.writerow(['Timestamp', 'Author', 'Message', 'Action'])
         writer.writerow([datetime.now().strftime('%Y-%m-%d %H:%M:%S'), author, content, action])
+
 
 def validate_token(tk):
     headers = get_headers(tk)
@@ -269,6 +273,7 @@ def validate_token(tk):
         pass
     return False, None
 
+
 def safety_filter(text):
     harmful_terms = ["self-harm", "suicide", "kys", "kill yourself", "harming myself"]
     for term in harmful_terms:
@@ -276,9 +281,8 @@ def safety_filter(text):
             return False
     return True
 
-# --- NEW: Badge Spoofer helpers ---
+
 def _build_super_properties():
-    """Build a valid X-Super-Properties header for analytics requests."""
     props = {
         "os": "Windows",
         "browser": "Chrome",
@@ -298,28 +302,20 @@ def _build_super_properties():
     raw = json.dumps(props, separators=(",", ":")).encode("utf-8")
     return base64.b64encode(raw).decode("utf-8")
 
+
 def fetch_analytics_token(token):
-    """Fetch the analytics token required for /science calls."""
     headers = get_headers(token)
     headers["X-Super-Properties"] = _build_super_properties()
     try:
-        r = requests.get(
-            "https://discord.com/api/v9/users/@me?with_analytics_token=true",
-            headers=headers,
-            timeout=8,
-        )
+        r = requests.get("https://discord.com/api/v9/users/@me?with_analytics_token=true", headers=headers, timeout=8)
         if r.status_code == 200:
             return r.json().get("analytics_token")
     except:
         pass
     return None
 
-def post_science_events(token, analytics_token, cookie, events):
-    """
-    POST events to Discord's /science endpoint.
-    cookie is the raw cf_clearance value (or full cookie string).
-    Returns (status_code, response_text).
-    """
+
+def post_science_events(token, analytics_token, cookie, events, fingerprint=None):
     headers = {
         "Authorization": token,
         "Content-Type": "application/json",
@@ -329,40 +325,22 @@ def post_science_events(token, analytics_token, cookie, events):
         "Referer": "https://discord.com/channels/@me",
     }
     if cookie:
-        # Allow either a raw value or full cookie string
-        if "cf_clearance=" in cookie:
-            headers["Cookie"] = cookie
-        else:
-            headers["Cookie"] = f"cf_clearance={cookie}"
-
-    payload = {
-        "token": analytics_token,
-        "events": events,
-    }
+        headers["Cookie"] = cookie if "cf_clearance=" in cookie else f"cf_clearance={cookie}"
+    payload = {"token": analytics_token, "events": events}
     try:
-        r = requests.post(
-            "https://discord.com/api/v9/science",
-            headers=headers,
-            json=payload,
-            timeout=15,
-        )
+        r = requests.post("https://discord.com/api/v9/science", headers=headers, json=payload, timeout=15)
         return r.status_code, r.text
     except Exception as e:
         return 0, str(e)
 
-def build_game_events(game_name, hours, game_id="0"):
-    """Build a launch_game + running_game_heartbeat event pair for a fake game session."""
+
+def build_game_events(game_name, hours, game_id="0", fingerprint=None):
     total_seconds = int(hours * 3600)
     launch_id = str(random.randint(10**17, 10**18 - 1))
     session_id = str(random.randint(10**17, 10**18 - 1))
-
     launch_event = {
         "type": "launch_game",
-        "game": {
-            "id": game_id,
-            "name": game_name,
-            "executable": game_name.lower().replace(" ", "_") + ".exe",
-        },
+        "game": {"id": game_id, "name": game_name, "executable": game_name.lower().replace(" ", "_") + ".exe"},
         "properties": {
             "client_launch_id": launch_id,
             "launch_platform": "desktop",
@@ -374,13 +352,11 @@ def build_game_events(game_name, hours, game_id="0"):
             "playtime_session_id": session_id,
         },
     }
-
+    if fingerprint:
+        launch_event["properties"]["executable_fingerprint"] = fingerprint
     heartbeat_event = {
         "type": "running_game_heartbeat",
-        "game": {
-            "id": game_id,
-            "name": game_name,
-        },
+        "game": {"id": game_id, "name": game_name},
         "properties": {
             "client_launch_id": launch_id,
             "game_id": game_id,
@@ -390,10 +366,59 @@ def build_game_events(game_name, hours, game_id="0"):
             "running_game_heartbeat_ms": total_seconds * 1000,
         },
     }
-
+    if fingerprint:
+        heartbeat_event["properties"]["executable_fingerprint"] = fingerprint
     return [launch_event, heartbeat_event]
 
-# --- Background reply logic (unchanged) ---
+
+def generate_steam_appmanifest(app_id, game_name, install_dir, steam_id="0"):
+    now = int(time.time())
+    acf = f'''"AppState"
+{{
+	"appid"		"{app_id}"
+	"Universe"		"1"
+	"LauncherPath"		"C:\\\\Program Files (x86)\\\\Steam\\\\steam.exe"
+	"name"		"{game_name}"
+	"StateFlags"		"1026"
+	"installdir"		"{install_dir}"
+	"LastUpdated"		"{now}"
+	"LastPlayed"		"0"
+	"SizeOnDisk"		"1000000000"
+	"StagingSize"		"1000000000"
+	"buildid"		"0"
+	"LastOwner"		"{steam_id}"
+	"UpdateResult"		"0"
+	"BytesToDownload"		"1000000000"
+	"BytesDownloaded"		"0"
+	"BytesToStage"		"1000000000"
+	"BytesStaged"		"0"
+	"TargetBuildID"		"0"
+	"AutoUpdateBehavior"		"0"
+	"AllowOtherDownloadsWhileRunning"		"0"
+	"ScheduledAutoUpdate"		"0"
+	"InstalledDepots"
+	{{
+		"{app_id}"		{{
+			"manifest"		"0"
+			"size"		"1000000000"
+		}}
+	}}
+	"SharedDepots"
+	{{
+	}}
+	"UserConfig"
+	{{
+		"language"		"english"
+	}}
+	"MountedConfig"
+	{{
+		"language"		"english"
+	}}
+}}
+'''
+    return acf
+
+
 def background_reply(latest, discord_url, typing_url, headers, client, system_prompt,
                      my_id, my_username, memory_depth, enable_safety, resp_delay,
                      owner_id_input, mention_only, model_id):
@@ -404,35 +429,27 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         content = latest['content'].strip()
         msg_id = latest['id']
         is_owner = author_id == str(owner_id_input).strip()
-
         if mention_only and not is_owner:
             if f"<@{my_id}>" not in content and f"<@!{my_id}>" not in content:
                 return False
-
         if time.time() < st.session_state.nvidia_retry_after:
             log_to_console(f"⏳ Rate‑limit cooldown until {datetime.fromtimestamp(st.session_state.nvidia_retry_after).strftime('%H:%M:%S')}. Skipping message.")
             return False
-
         requests.post(typing_url, headers=headers, timeout=5)
-
         long_term_mem = load_memory(channel_id)
         urls = re.findall(r'(https?://[^\s]+)', content)
         url_context = ""
         if urls:
-            url_context = f"\n[SYSTEM NOTE: The user provided a link: {urls[0]}. If it's a known site, discuss its likely content.]"
-
+            url_context = f"\n[SYSTEM NOTE: The user provided a link: {urls[0]}.]"
         system_instruction = f"{system_prompt}\n\nIMPORTANT: Always end your response with the tag: {AI_TAG}"
         chat_history = [{"role": "system", "content": f"PERSONA: {system_instruction}. Current memory: {long_term_mem}. {url_context}"}]
         context_req = requests.get(f"{discord_url}?limit={memory_depth}", headers=headers, timeout=5).json()
-
         if isinstance(context_req, list):
             for m in reversed(context_req):
                 role = "assistant" if str(m['author']['id']) == str(my_id) else "user"
                 sender = f"[{m['author']['username']}]: " if role == "user" else ""
                 chat_history.append({"role": role, "content": f"{sender}{m['content']}"})
-
         log_to_console(f"📡 Sending request to NVIDIA model: {model_id}")
-
         try:
             response = client.chat.completions.create(model=model_id, messages=chat_history)
             reply = response.choices[0].message.content
@@ -445,13 +462,12 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
                 except:
                     retry_after = 60
             st.session_state.nvidia_retry_after = time.time() + float(retry_after)
-            log_to_console(f"⚠️ NVIDIA rate limit hit. Cooldown until {datetime.fromtimestamp(st.session_state.nvidia_retry_after).strftime('%H:%M:%S')}. Waiting {retry_after}s.")
+            log_to_console(f"⚠️ NVIDIA rate limit hit. Cooldown until {datetime.fromtimestamp(st.session_state.nvidia_retry_after).strftime('%H:%M:%S')}.")
             return False
         except Exception as e:
             log_to_console(f"❌ NVIDIA API error: {str(e)}")
             st.session_state.debug_log = f"NVIDIA API error: {str(e)}"
             return False
-
         MAX_MSG_LEN = 2000
         TAG_LEN = len(AI_TAG)
         if AI_TAG not in reply:
@@ -459,9 +475,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
             reply = reply.strip()[:max_content_len] + " " + AI_TAG
         else:
             reply = reply.strip()[:MAX_MSG_LEN]
-
         log_to_console(f"✅ Received AI reply (length={len(reply)}): {reply[:50]}...")
-
         new_summary_prompt = f"Summarize key points in 2 sentences: {reply}"
         try:
             summary_resp = client.chat.completions.create(model=model_id, messages=[{"role": "user", "content": new_summary_prompt}])
@@ -469,17 +483,15 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         except openai.RateLimitError as e:
             retry_after = getattr(e, 'retry_after', 60)
             st.session_state.nvidia_retry_after = time.time() + float(retry_after)
-            log_to_console(f"⚠️ NVIDIA rate limit during summary. Cooldown set.")
         except Exception as e:
             log_to_console(f"⚠️ Memory summary failed: {str(e)}")
-
         if not enable_safety or safety_filter(reply):
             if resp_delay > 0 and not is_owner:
                 time.sleep(resp_delay)
             post_resp = requests.post(discord_url, json={"content": reply}, headers=headers, timeout=5)
             if post_resp.status_code not in (200, 201):
                 st.session_state.debug_log = f"Discord post failed: {post_resp.status_code} {post_resp.text}"
-                log_to_console(f"❌ Failed to send reply: {post_resp.status_code} (length={len(reply)})")
+                log_to_console(f"❌ Failed to send reply: {post_resp.status_code}")
                 return False
             st.session_state.last_ai_content = reply.strip()
             log_to_csv(author_username, content, "Reply Sent")
@@ -491,7 +503,7 @@ def background_reply(latest, discord_url, typing_url, headers, client, system_pr
         log_to_console(f"❌ Automation runtime error: {str(e)}")
         return False
 
-# --- Sidebar: Authentication & Settings ---
+
 with st.sidebar:
     st.header("🔑 Authentication")
     token_input = st.text_input("Discord Token", type="password", key="discord_token_input")
@@ -509,30 +521,24 @@ with st.sidebar:
     else:
         st.session_state.my_username = None
         st.session_state.my_id = None
-
     or_key = st.text_input("NVIDIA API Key", type="password", key="nvidia_key_input")
     if or_key:
         st.session_state.or_key = or_key.strip()
-
     channel_id_input = st.text_input("Channel ID", key="channel_id_input")
     if channel_id_input:
         st.session_state.channel_id = channel_id_input.strip().replace("\r", "").replace("\n", "")
-
     st.divider()
     st.header("⚙️ Bot Settings")
     mention_only = st.toggle("Mention-Only Mode (429 Protection)", value=False)
     st.session_state.mention_only = mention_only
-
     if st.session_state.bot_running:
         st.markdown("### 🟢 Connection Active")
-
     memory_depth = st.slider("Memory Depth (Past Msgs)", min_value=1, max_value=20, value=5)
     st.session_state.memory_depth = memory_depth
     poll_speed = st.slider("Polling Frequency (Seconds)", 0.1, 5.0, 0.5)
     st.session_state.poll_speed = poll_speed
     resp_delay = st.slider("Response Delay (Seconds)", 0.0, 5.0, 0.0)
     st.session_state.resp_delay = resp_delay
-
     c_safety, c_restart = st.columns(2)
     with c_safety:
         enable_safety = st.toggle("Enable Safety Filter", value=True)
@@ -540,7 +546,7 @@ with st.sidebar:
     with c_restart:
         auto_restart_10m = st.toggle("10m Auto-Restart", value=False)
 
-# --- Tabs (two new appended) ---
+
 tabs_list = [
     "🤖 Bot Control", "📂 History Scraper", "🧠 Memory", "🌾 Server Harvester",
     "💎 Free Emoji", "❄️ Snowflake Decoder", "📱 App Hunter", "🎙️ VC Lurker",
@@ -548,18 +554,22 @@ tabs_list = [
     "👻 Message Ghoster", "🎨 Text Color", "⏳ Infinite Typing", "🔎 OSINT Search",
     "🎭 Status Spoofer", "🖼️ Sticker Spoofer", "📦 Large File Bridge", "👻 Invisible Identity",
     "🌀 Bio Animator", "👻 Ghost Pinger", "📋 Server Cloner", "💎 Nitro Badge", "🎬 2D Animator",
-    "💠 Badge Spoofer", "🤝 Friend Invites"
+    "💠 Badge Spoofer", "🤝 Friend Invites",
+    "🔑 Token Checker", "📡 Guild Scraper", "🧪 Nitro Plugin Gen", "🛠️ Steam ACF Gen",
+    "🎯 Quest Guide", "💻 macOS Exploit", "📨 Mass DM Guide",
+    "🏃 Vanity Sniper", "💎 Nitro Sniper", "📝 Message Logger", "📦 Guild Backup",
+    "🔗 Token Joiner", "🧅 Tor Manager", "📱 QR Login Kit", "🤖 Android Gen",
+    "🎤 Voice Changer", "☢️ Nuke Research", "🕵️ Grabber Guide",
+    "💰 Client Manager", "🚀 Deployment Guide",
 ]
 tabs = st.tabs(tabs_list)
 
-# ================= TAB 1: BOT CONTROL =================
+
 with tabs[0]:
     st.header("🤖 Bot Control")
-
     model_id = st.text_input("Model ID", key="model_id_input")
     if model_id:
         st.session_state.model_id = model_id.strip()
-
     col1, col2 = st.columns(2)
     with col1:
         persona_dict = {
@@ -567,7 +577,7 @@ with tabs[0]:
             "Sarcastic Bot": "You are a sarcastic, witty bot.", "Technical Support": "You are a technical expert.",
             "Chaos Mode": "Short and weird replies.", "Cyberpunk Hacker": "Netrunner persona.",
             "Stoic Philosopher": "Calm and logical.", "Gamer Streamer": "Hype, POG, L, W.",
-            "The Detective": "Noir film character."
+            "The Detective": "Noir film character.",
         }
         selected_persona = st.selectbox("Preset Personas", list(persona_dict.keys()))
         default_prompt = persona_dict[selected_persona] if selected_persona != "Custom" else "You are a helpful assistant."
@@ -579,11 +589,9 @@ with tabs[0]:
         blacklist_input = st.text_area("Blacklisted Keywords")
         allowed_input = st.text_input("Allowed Users", value="everyone")
         blacklisted_users_input = st.text_input("Blacklisted Users")
-
     allowed_users = "everyone" if allowed_input.lower().strip() == "everyone" else [u.strip().lower() for u in allowed_input.split(",") if u.strip()]
     blacklisted_users = [u.strip().lower() for u in blacklisted_users_input.split(",") if u.strip()]
     blacklist = [word.strip().lower() for word in blacklist_input.split(",") if word.strip()]
-
     if st.session_state.or_key:
         client = openai.OpenAI(api_key=st.session_state.or_key, base_url=NVIDIA_BASE_URL)
     else:
@@ -604,9 +612,6 @@ with tabs[0]:
             st.success(f"✅ {len(modelsout)} models available")
         else:
             st.info("Model list not loaded (check API key or connection)")
-    else:
-        modelsout = []
-
     c1, c2 = st.columns(2)
     with c1:
         if st.button("▶️ Launch Bot", disabled=not (st.session_state.my_username and st.session_state.or_key and st.session_state.model_id), use_container_width=True):
@@ -619,13 +624,11 @@ with tabs[0]:
             st.session_state.bot_running = False
             log_to_console("🛑 Bot stopped.")
             st.rerun()
-
     if st.session_state.bot_running:
         st.success("Status: 🟢 ONLINE")
         headers = get_headers(st.session_state.discord_token)
         discord_url = f"https://discord.com/api/v9/channels/{st.session_state.channel_id}/messages"
         typing_url = f"https://discord.com/api/v9/channels/{st.session_state.channel_id}/typing"
-
         try:
             r = requests.get(discord_url, headers=headers, timeout=5)
             if r.status_code == 200:
@@ -635,17 +638,13 @@ with tabs[0]:
                         msg_id = msg['id']
                         author_id = str(msg['author']['id'])
                         content = msg['content'].strip()
-
                         if author_id == str(st.session_state.my_id):
                             continue
-
                         if AI_TAG in content:
                             log_to_console(f"⏭️ Skipping message with AI tag: {content[:50]}...")
                             continue
-
                         if msg_id in st.session_state.processed_msg_ids:
                             continue
-
                         success = background_reply(
                             msg, discord_url, typing_url, headers,
                             client, st.session_state.system_prompt,
@@ -660,7 +659,6 @@ with tabs[0]:
                             save_processed_ids(st.session_state.processed_msg_ids)
                             log_to_console(f"✅ Message {msg_id} processed.")
                         break
-
             time.sleep(st.session_state.poll_speed)
             st.rerun()
         except Exception as e:
@@ -670,21 +668,20 @@ with tabs[0]:
     else:
         st.info("Bot is stopped.")
 
-# Tab 2: History Scraper
+
 with tabs[1]:
     st.header("📥 Channel History Scraper")
     limit = st.number_input("Fetch Limit", min_value=1, max_value=100, value=50)
     if st.button("🔍 Scrape"):
         if st.session_state.discord_token and st.session_state.channel_id:
             log_to_console(f"📥 Querying message history arrays inside channel ID: {st.session_state.channel_id}")
-            res = requests.get(f"https://discord.com/api/v9/channels/{st.session_state.channel_id}/messages?limit={limit}",
-                               headers=get_headers(st.session_state.discord_token), timeout=5)
+            res = requests.get(f"https://discord.com/api/v9/channels/{st.session_state.channel_id}/messages?limit={limit}", headers=get_headers(st.session_state.discord_token), timeout=5)
             if res.status_code == 200:
                 st.dataframe(pd.DataFrame([{"Author": m['author']['username'], "Content": m['content']} for m in res.json()]))
         else:
             st.error("Missing configuration credentials.")
 
-# Tab 3: Persistent Memory
+
 with tabs[2]:
     st.header("🧠 Persistent Memory")
     if os.path.exists(MEMORY_FILE):
@@ -699,10 +696,10 @@ with tabs[2]:
         log_to_console("🧠 AI local conversational short-term memory files wiped clean.")
         st.success("Memory Nuked.")
 
-# Tab 4: Server Harvester
+
 with tabs[3]:
     st.header("🌾 Server Harvester")
-    target_guild = st.text_input("Target Server ID").strip().replace("\r","").replace("\n","")
+    target_guild = st.text_input("Target Server ID").strip().replace("\r", "").replace("\n", "")
     if st.button("📥 Harvest Emojis"):
         if st.session_state.discord_token and target_guild:
             log_to_console(f"🌾 Extracting structural custom graphic payload arrays from server: {target_guild}")
@@ -712,11 +709,11 @@ with tabs[3]:
                     url = f"https://cdn.discordapp.com/emojis/{e['id']}.png"
                     st.image(url, width=64, caption=f"{e['name']} (ID: {e['id']})")
 
-# Tab 5: Free Emoji
+
 with tabs[4]:
     st.header("💎 Nitro-Free Emoji Spoofer")
-    target_ch = st.text_input("Target Channel ID", value=st.session_state.channel_id, key="emoji_ch").strip().replace("\r","").replace("\n","")
-    emoji_id = st.text_input("Emoji ID").strip().replace("\r","").replace("\n","")
+    target_ch = st.text_input("Target Channel ID", value=st.session_state.channel_id, key="emoji_ch").strip().replace("\r", "").replace("\n", "")
+    emoji_id = st.text_input("Emoji ID").strip().replace("\r", "").replace("\n", "")
     is_animated = st.checkbox("Is Animated?")
     if st.button("🚀 Send Emoji", use_container_width=True):
         if st.session_state.discord_token and emoji_id and target_ch:
@@ -726,7 +723,7 @@ with tabs[4]:
             log_to_console(f"💎 Dispatched spoofed Nitro graphic layout to channel: {target_ch}")
             st.success("Emoji Sent!")
 
-# Tab 6: Snowflake Decoder
+
 with tabs[5]:
     st.header("❄️ Snowflake Age Decoder")
     input_id = st.text_input("Enter User or Server ID").strip()
@@ -736,7 +733,7 @@ with tabs[5]:
             date_obj = datetime.fromtimestamp(timestamp / 1000.0)
             st.success(f"Creation Date: **{date_obj.strftime('%Y-%m-%d %H:%M:%S')} UTC**")
 
-# Tab 7: App Hunter
+
 with tabs[6]:
     st.header("📱 Authorized App Hunter")
     if st.button("🔍 Scan Applications", use_container_width=True):
@@ -749,11 +746,11 @@ with tabs[6]:
                     with st.expander(f"📲 {app_name}"):
                         st.write(f"**Scopes:** `{', '.join(a.get('scopes', []))}`")
 
-# Tab 8: VC Lurker
+
 with tabs[7]:
     st.header("🎙️ VC Lurker (Direct Scan)")
-    target_guild_id = st.text_input("Server ID", key="lurker_guild").strip().replace("\r","").replace("\n","")
-    target_vc_id = st.text_input("Specific Voice Channel ID", key="lurker_vc").strip().replace("\r","").replace("\n","")
+    target_guild_id = st.text_input("Server ID", key="lurker_guild").strip().replace("\r", "").replace("\n", "")
+    target_vc_id = st.text_input("Specific Voice Channel ID", key="lurker_vc").strip().replace("\r", "").replace("\n", "")
     if st.button("📡 Scan Voice Channel", use_container_width=True):
         if st.session_state.discord_token and target_guild_id and target_vc_id:
             h = get_headers(st.session_state.discord_token)
@@ -766,12 +763,12 @@ with tabs[7]:
                     found = [{"User": m['user']['username'], "ID": m['user']['id']} for m in members if 'user' in m]
                     st.table(pd.DataFrame(found))
 
-# Tab 9: Soundboard Spoofer
+
 with tabs[8]:
     st.header("🔊 Soundboard Anywhere Spoofer")
-    sound_ch_id = st.text_input("Voice Channel ID", value=st.session_state.channel_id).strip().replace("\r","").replace("\n","")
-    sound_id = st.text_input("Sound ID").strip().replace("\r","").replace("\n","")
-    sound_guild_id = st.text_input("Source Server ID").strip().replace("\r","").replace("\n","")
+    sound_ch_id = st.text_input("Voice Channel ID", value=st.session_state.channel_id).strip().replace("\r", "").replace("\n", "")
+    sound_id = st.text_input("Sound ID").strip().replace("\r", "").replace("\n", "")
+    sound_guild_id = st.text_input("Source Server ID").strip().replace("\r", "").replace("\n", "")
     if st.button("🔊 Fire Sound", use_container_width=True):
         if st.session_state.discord_token and sound_ch_id and sound_id:
             h = get_headers(st.session_state.discord_token)
@@ -781,7 +778,7 @@ with tabs[8]:
                 log_to_console(f"🔊 Soundboard vector index packet triggered to channel: {sound_ch_id}")
                 st.success("Sound Played!")
 
-# Tab 10: HypeSquad
+
 with tabs[9]:
     st.header("✨ HypeSquad Spoofer")
     house = st.selectbox("House", ["Bravery", "Brilliance", "Balance"])
@@ -792,7 +789,7 @@ with tabs[9]:
             log_to_console(f"✨ Account properties context altered to badge state: HypeSquad {house}")
             st.success("House Applied")
 
-# Tab 11: Account Audit
+
 with tabs[10]:
     st.header("🔍 Account Auditor")
     if st.button("Run Audit"):
@@ -800,20 +797,20 @@ with tabs[10]:
             u_res = requests.get("https://discord.com/api/v9/users/@me", headers=get_headers(st.session_state.discord_token), timeout=5).json()
             st.json(u_res)
 
-# Tab 12: Webhook Commander
+
 with tabs[11]:
     st.header("📢 Webhook Commander")
-    wh_url = st.text_input("Webhook URL").strip().replace("\r","").replace("\n","")
+    wh_url = st.text_input("Webhook URL").strip().replace("\r", "").replace("\n", "")
     wh_msg = st.text_area("Message content")
     if st.button("Fire"):
         if wh_url:
             requests.post(wh_url, json={"content": wh_msg}, timeout=5)
             log_to_console("📢 External API data string fired to webhook collector targets.")
 
-# Tab 13: Message Ghoster
+
 with tabs[12]:
     st.header("👻 Message Ghoster")
-    ghost_ch = st.text_input("Target Channel ID", value=st.session_state.channel_id, key="ghost_ch").strip().replace("\r","").replace("\n","")
+    ghost_ch = st.text_input("Target Channel ID", value=st.session_state.channel_id, key="ghost_ch").strip().replace("\r", "").replace("\n", "")
     ghost_limit = st.number_input("Scan Limit", min_value=1, max_value=500, value=50)
     if st.button("🔥 Purge My Messages", use_container_width=True):
         if st.session_state.discord_token and st.session_state.my_id and ghost_ch:
@@ -827,7 +824,7 @@ with tabs[12]:
                         log_to_console(f"🗑️ Cleaned message index payload element: {m['id']}")
                         time.sleep(1.2)
 
-# Tab 14: Text Color
+
 with tabs[13]:
     st.header("🎨 ANSI Color Painter")
     color_text = st.text_input("Your Message")
@@ -839,7 +836,7 @@ with tabs[13]:
             ansi_payload = f"```ansi\n\u001b[{code}m{color_text}```"
             requests.post(f"https://discord.com/api/v9/channels/{st.session_state.channel_id}/messages", headers=get_headers(st.session_state.discord_token), json={"content": ansi_payload}, timeout=5)
 
-# Tab 15: Infinite Typing
+
 with tabs[14]:
     st.header("⏳ Infinite Typing Indicator")
     if st.button("🚀 Start Infinite Typing", use_container_width=True):
@@ -853,51 +850,50 @@ with tabs[14]:
         time.sleep(random.randint(5, 8))
         st.rerun()
 
-# Tab 16: OSINT Search
+
 with tabs[15]:
     st.header("🔎 OSINT Search Engine")
     q_col, t_col = st.columns([3, 1])
-    with q_col: search_query = st.text_input("Enter search query")
-    with t_col: search_type = st.selectbox("Search Scope", ["Web", "News", "Images"])
+    with q_col:
+        search_query = st.text_input("Enter search query")
+    with t_col:
+        search_type = st.selectbox("Search Scope", ["Web", "News", "Images"])
     if st.button("Execute Intelligence Search", use_container_width=True):
         if search_query:
             log_to_console(f"🔎 Triggering clear-net indexing algorithm for keyword: {search_query}")
             with DDGS() as ddgs:
                 if search_type == "Web":
-                    results = list(ddgs.text(search_query, max_results=10))
-                    for res in results:
+                    for res in list(ddgs.text(search_query, max_results=10)):
                         st.markdown(f"### [{res['title']}]({res['href']})")
                         st.write(res['body'])
                         st.divider()
                 elif search_type == "News":
-                    results = list(ddgs.news(search_query, max_results=10))
-                    for res in results:
+                    for res in list(ddgs.news(search_query, max_results=10)):
                         st.info(f"{res['date']} - {res['source']}")
                         st.markdown(f"**[{res['title']}]({res['url']})**")
                         st.write(res['body'])
                         st.divider()
                 elif search_type == "Images":
-                    results = list(ddgs.images(search_query, max_results=10))
                     cols = st.columns(2)
-                    for i, res in enumerate(results):
-                        with cols[i % 2]: st.image(res['image'], caption=res['title'])
+                    for i, res in enumerate(list(ddgs.images(search_query, max_results=10))):
+                        with cols[i % 2]:
+                            st.image(res['image'], caption=res['title'])
 
-# Tab 17: Status Spoofer
+
 with tabs[16]:
     st.header("🎭 Rich Presence (NTTS Style)")
-    app_id = st.text_input("Application (Client) ID", placeholder="1234567890...").strip().replace("\r","").replace("\n","")
+    app_id = st.text_input("Application (Client) ID", placeholder="1234567890...").strip().replace("\r", "").replace("\n", "")
     game_name = st.text_input("Main Heading", value="about me")
     details = st.text_input("Sub-heading", value="Helping gamers out")
     st.divider()
     col_img, col_btn = st.columns(2)
     with col_img:
-        large_image_key = st.text_input("Large Image Asset Key/URL", value="mp:external/...").strip().replace("\r","").replace("\n","")
+        large_image_key = st.text_input("Large Image Asset Key/URL", value="mp:external/...").strip().replace("\r", "").replace("\n", "")
         large_text = st.text_input("Image Hover Text", value="Verified")
     with col_btn:
         b1_label = st.text_input("Button 1 Label", value="YouTube Channel")
-        b1_url = st.text_input("Button 1 URL", value="https://youtube.com").strip().replace("\r","").replace("\n","")
+        b1_url = st.text_input("Button 1 URL", value="https://youtube.com").strip().replace("\r", "").replace("\n", "")
         act_status = st.selectbox("Appearance", ["online", "idle", "dnd", "invisible"], key="ntts_status")
-
     if st.button("✨ Apply NTTS Presence", use_container_width=True):
         if st.session_state.discord_token and app_id:
             headers = get_headers(st.session_state.discord_token)
@@ -909,11 +905,11 @@ with tabs[16]:
             else:
                 st.error(f"Error: {res.text}")
 
-# Tab 18: Sticker Spoofer
+
 with tabs[17]:
     st.header("🖼️ Nitro Sticker Spoofer")
-    stick_ch = st.text_input("Target Channel ID", value=st.session_state.channel_id, key="sticker_ch").strip().replace("\r","").replace("\n","")
-    stick_id = st.text_input("Sticker ID").strip().replace("\r","").replace("\n","")
+    stick_ch = st.text_input("Target Channel ID", value=st.session_state.channel_id, key="sticker_ch").strip().replace("\r", "").replace("\n", "")
+    stick_id = st.text_input("Sticker ID").strip().replace("\r", "").replace("\n", "")
     if st.button("🚀 Send Spoofed Sticker", use_container_width=True):
         if stick_id and st.session_state.discord_token and stick_ch:
             h = get_headers(st.session_state.discord_token)
@@ -921,10 +917,10 @@ with tabs[17]:
             requests.post(f"https://discord.com/api/v9/channels/{stick_ch}/messages", headers=h, json={"content": sticker_url}, timeout=5)
             st.success("Sticker Sent!")
 
-# Tab 19: Large File Bridge
+
 with tabs[18]:
     st.header("📦 Large File Bridge")
-    file_ch = st.text_input("Target Channel ID", value=st.session_state.channel_id, key="file_ch").strip().replace("\r","").replace("\n","")
+    file_ch = st.text_input("Target Channel ID", value=st.session_state.channel_id, key="file_ch").strip().replace("\r", "").replace("\n", "")
     uploaded_file = st.file_uploader("Select File")
     if st.button("📤 Upload & Send Link", use_container_width=True):
         if uploaded_file and st.session_state.discord_token and file_ch:
@@ -934,12 +930,12 @@ with tabs[18]:
                     up_res = requests.post(f"https://{server}.gofile.io/uploadFile", files={'file': (uploaded_file.name, uploaded_file.getvalue())}, timeout=30).json()
                     dl_url = up_res['data']['downloadPage']
                     requests.post(f"https://discord.com/api/v9/channels/{file_ch}/messages", headers=get_headers(st.session_state.discord_token), json={"content": f"📁 **File:** {uploaded_file.name}\n🔗 {dl_url}"}, timeout=5)
-                    log_to_console(f"📦 Bridged file reference data payload link to target channel.")
+                    log_to_console("📦 Bridged file reference data payload link to target channel.")
                     st.success("Sent!")
                 except:
                     st.error("Bridge failure.")
 
-# Tab 20: Invisible Identity
+
 with tabs[19]:
     st.header("👻 Invisible Identity")
     st.code("\u17b5", language="text")
@@ -949,19 +945,17 @@ with tabs[19]:
             log_to_console("👤 Injected structural zero-width whitespace element to user profile biography.")
             st.success("Bio Ghosted.")
 
-# Tab 21: Bio Animator
+
 with tabs[20]:
     st.header("🌀 Bio Animator")
     bio_frames = st.text_area("Bio Frames (One per line)", "Coding...\nDeveloping...\nControl Hub Active...")
     anim_speed = st.slider("Animation Speed (Seconds)", 30, 300, 60)
-
     if st.button("▶️ Start Bio Animation", use_container_width=True):
         st.session_state.bio_anim_active = True
         log_to_console("🌀 Biography rotational updating frame logic active.")
     if st.button("🛑 Stop Animation", use_container_width=True):
         st.session_state.bio_anim_active = False
         log_to_console("🌀 Biography rotational updating frame logic halted.")
-
     if st.session_state.bio_anim_active and st.session_state.discord_token:
         frames = [f.strip() for f in bio_frames.split("\n") if f.strip()]
         if frames:
@@ -971,12 +965,11 @@ with tabs[20]:
             time.sleep(10)
             st.rerun()
 
-# Tab 22: Ghost Pinger
+
 with tabs[21]:
     st.header("👻 Ghost Pinger")
-    ghost_target_id = st.text_input("User ID to Ghost Ping").strip().replace("\r","").replace("\n","")
-    ghost_ch_id = st.text_input("Channel ID", value=st.session_state.channel_id, key="ghost_ping_ch").strip().replace("\r","").replace("\n","")
-
+    ghost_target_id = st.text_input("User ID to Ghost Ping").strip().replace("\r", "").replace("\n", "")
+    ghost_ch_id = st.text_input("Channel ID", value=st.session_state.channel_id, key="ghost_ping_ch").strip().replace("\r", "").replace("\n", "")
     if st.button("💀 Fire Ghost Ping", use_container_width=True):
         if st.session_state.discord_token and ghost_target_id and ghost_ch_id:
             h = get_headers(st.session_state.discord_token)
@@ -988,26 +981,20 @@ with tabs[21]:
                 log_to_console(f"👻 Dispatched and redacted user tag ping context vector targeting ID: {ghost_target_id}")
                 st.success("Ghost Ping Delivered.")
 
-# Tab 23: Server Cloner
+
 with tabs[22]:
     st.header("📋 Server Structure Cloner")
-    clone_guild_id = st.text_input("Server (Guild) ID to Clone").strip().replace("\r","").replace("\n","")
-
+    clone_guild_id = st.text_input("Server (Guild) ID to Clone").strip().replace("\r", "").replace("\n", "")
     if st.button("📂 Export Server Structure", use_container_width=True):
         if st.session_state.discord_token and clone_guild_id:
             h = get_headers(st.session_state.discord_token)
             log_to_console(f"📋 Exporting layout schema configurations for guild element ID: {clone_guild_id}")
             guild_data = requests.get(f"https://discord.com/api/v9/guilds/{clone_guild_id}", headers=h, timeout=5).json()
             channels = requests.get(f"https://discord.com/api/v9/guilds/{clone_guild_id}/channels", headers=h, timeout=5).json()
-
-            clone_package = {
-                "name": guild_data.get("name"),
-                "roles": guild_data.get("roles"),
-                "channels": channels
-            }
+            clone_package = {"name": guild_data.get("name"), "roles": guild_data.get("roles"), "channels": channels}
             st.download_button("Download Clone JSON", data=json.dumps(clone_package, indent=4), file_name=f"clone_{clone_guild_id}.json")
 
-# Tab 24: Nitro Badge
+
 with tabs[23]:
     st.header("💎 Nitro Badge Spoofer")
     nitro_bit = 1
@@ -1024,23 +1011,15 @@ with tabs[23]:
             else:
                 st.error(f"Failed to patch structural status: {res.status_code}")
 
-# Tab 25: 2D Animator
+
 with tabs[24]:
     st.header("🎬 2D Animator (Advanced Multi-Profile Engine)")
     anim_ch_raw = st.text_input("Target Channel ID", value=st.session_state.channel_id, key="anim_ch_id")
     anim_ch = anim_ch_raw.strip().replace("\r", "").replace("\n", "") if anim_ch_raw else ""
     uploaded_media = st.file_uploader("Upload Target Animation Asset (GIF, MP4, MOV)", type=["gif", "mp4", "mov", "avi"])
-    render_style = st.selectbox(
-        "Render Style Mapping Profile",
-        [
-            "Flawless 1:1 Braille Matrix (High Res)",
-            "Ultra-Sharp Block Pixel Art (▄▀█)",
-            "External API Cloud-Generated ASCII"
-        ]
-    )
+    render_style = st.selectbox("Render Style Mapping Profile", ["Flawless 1:1 Braille Matrix (High Res)", "Ultra-Sharp Block Pixel Art (▄▀█)", "External API Cloud-Generated ASCII"])
     char_width = st.slider("Target Width Matrix (Characters)", 15, 60, 32)
     max_frames = st.slider("Max Frames Limit", min_value=5, max_value=100, value=40)
-
     if st.button("Run Full Deconstruction & Build Frames", use_container_width=True):
         if not uploaded_media:
             st.error("Please supply a valid media asset payload before initiating compilation.")
@@ -1059,8 +1038,7 @@ with tabs[24]:
                     def target_render_frame(pil_img, style, target_w):
                         orig_w, orig_h = pil_img.size
                         if style == "Flawless 1:1 Braille Matrix (High Res)":
-                            char_h = int((orig_h / orig_w) * target_w)
-                            if char_h < 1: char_h = 1
+                            char_h = max(1, int((orig_h / orig_w) * target_w))
                             pixel_w = target_w * 2
                             pixel_h = char_h * 4
                             gray_img = pil_img.resize((pixel_w, pixel_h)).convert("L")
@@ -1070,20 +1048,27 @@ with tabs[24]:
                                 row_chars = []
                                 for x in range(0, pixel_w, 2):
                                     mask = 0
-                                    if pixels[x, y]     > 127: mask |= 1
-                                    if pixels[x, y+1]   > 127: mask |= 2
-                                    if pixels[x, y+2]   > 127: mask |= 4
-                                    if pixels[x+1, y]   > 127: mask |= 8
-                                    if pixels[x+1, y+1] > 127: mask |= 16
-                                    if pixels[x+1, y+2] > 127: mask |= 32
-                                    if pixels[x, y+3]   > 127: mask |= 64
-                                    if pixels[x+1, y+3] > 127: mask |= 128
+                                    if pixels[x, y] > 127:
+                                        mask |= 1
+                                    if pixels[x, y + 1] > 127:
+                                        mask |= 2
+                                    if pixels[x, y + 2] > 127:
+                                        mask |= 4
+                                    if pixels[x + 1, y] > 127:
+                                        mask |= 8
+                                    if pixels[x + 1, y + 1] > 127:
+                                        mask |= 16
+                                    if pixels[x + 1, y + 2] > 127:
+                                        mask |= 32
+                                    if pixels[x, y + 3] > 127:
+                                        mask |= 64
+                                    if pixels[x + 1, y + 3] > 127:
+                                        mask |= 128
                                     row_chars.append(chr(0x2800 + mask))
                                 lines.append("".join(row_chars))
                             return "```\n" + "\n".join(lines) + "\n```"
                         elif style == "Ultra-Sharp Block Pixel Art (▄▀█)":
-                            char_h = int((orig_h / orig_w) * target_w)
-                            if char_h < 1: char_h = 1
+                            char_h = max(1, int((orig_h / orig_w) * target_w))
                             pixel_w = target_w
                             pixel_h = char_h * 2
                             gray_img = pil_img.resize((pixel_w, pixel_h)).convert("L")
@@ -1093,31 +1078,30 @@ with tabs[24]:
                                 row_chars = []
                                 for x in range(0, pixel_w):
                                     top_pixel = pixels[x, y] > 127
-                                    bottom_pixel = pixels[x, y+1] > 127
-                                    if top_pixel and bottom_pixel: row_chars.append("█")
-                                    elif top_pixel: row_chars.append("▀")
-                                    elif bottom_pixel: row_chars.append("▄")
-                                    else: row_chars.append(" ")
+                                    bottom_pixel = pixels[x, y + 1] > 127
+                                    if top_pixel and bottom_pixel:
+                                        row_chars.append("█")
+                                    elif top_pixel:
+                                        row_chars.append("▀")
+                                    elif bottom_pixel:
+                                        row_chars.append("▄")
+                                    else:
+                                        row_chars.append(" ")
                                 lines.append("".join(row_chars))
                             return "```\n" + "\n".join(lines) + "\n```"
                         else:
                             try:
                                 buffer = io.BytesIO()
                                 pil_img.save(buffer, format="JPEG")
-                                img_bytes = buffer.getvalue()
-                                api_res = requests.post(
-                                    f"https://asciiart.club/api/convert?width={target_w}",
-                                    files={"file": ("frame.jpg", img_bytes, "image/jpeg")},
-                                    timeout=6
-                                )
+                                api_res = requests.post(f"https://asciiart.club/api/convert?width={target_w}", files={"file": ("frame.jpg", buffer.getvalue(), "image/jpeg")}, timeout=6)
                                 if api_res.status_code == 200 and api_res.text.strip():
                                     return f"```\n{api_res.text.strip()}\n```"
-                            except: pass
-                            target_h = int((orig_h / orig_w) * target_w * 0.50)
-                            if target_h < 1: target_h = 1
+                            except:
+                                pass
+                            target_h = max(1, int((orig_h / orig_w) * target_w * 0.50))
                             gray_img = pil_img.resize((target_w, target_h)).convert("L")
                             pixels_list = list(gray_img.getdata())
-                            density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
+                            density_ramp = "$@B%8&WM#*oahkbdpqwmZO0QLCJUYXzcvunxrjft/\\|()1{}[]?-_+~<>i!lI;:,\"^`'. "
                             ramp_len = len(density_ramp)
                             text_map = "".join([density_ramp[int((255 - v) * (ramp_len - 1) / 255)] for v in pixels_list])
                             lines = [text_map[i:i + target_w] for i in range(0, len(text_map), target_w)]
@@ -1138,20 +1122,21 @@ with tabs[24]:
                         frame_count = 0
                         while cap.isOpened():
                             ret, frame_bgr = cap.read()
-                            if not ret: break
+                            if not ret:
+                                break
                             if frame_count % 3 == 0:
                                 frame_rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
                                 pil_frame = Image.fromarray(frame_rgb)
                                 compiled_frames.append(target_render_frame(pil_frame, render_style, char_width))
                             frame_count += 1
                         cap.release()
-                        try: os.remove(temp_path)
-                        except: pass
-
+                        try:
+                            os.remove(temp_path)
+                        except:
+                            pass
                     if len(compiled_frames) > max_frames:
                         step = max(1, len(compiled_frames) // max_frames)
                         compiled_frames = compiled_frames[::step][:max_frames]
-
                     if compiled_frames:
                         st.session_state.converted_media_frames = compiled_frames
                         st.success(f"Successfully processed {len(compiled_frames)} optimized frames!")
@@ -1161,7 +1146,6 @@ with tabs[24]:
                 except Exception as err:
                     st.error(f"Compilation error: {str(err)}")
                     log_to_console(f"❌ Structural failure during processing: {str(err)}")
-
     st.markdown("---")
     if st.button("Fire 2D Anim", use_container_width=True):
         if not st.session_state.discord_token:
@@ -1191,8 +1175,7 @@ with tabs[24]:
                                 time.sleep(1.0)
                             elif patch_res.status_code == 429:
                                 rate_limit_data = patch_res.json()
-                                backoff_timer = float(rate_limit_data.get("retry_after", 1.5))
-                                time.sleep(backoff_timer + 0.1)
+                                time.sleep(float(rate_limit_data.get("retry_after", 1.5)) + 0.1)
                             else:
                                 transaction_complete = True
                     monitor.success("✨ Sequence array streaming successfully finalized!")
@@ -1202,25 +1185,17 @@ with tabs[24]:
             except Exception as stream_err:
                 st.error(f"Streaming anomaly detected: {str(stream_err)}")
 
-# ================= TAB 26: BADGE SPOOFER (NEW) =================
+
 with tabs[25]:
     st.header("💠 Badge Spoofer — Analytics `/science` Vector")
-    st.caption("Injects fake game-play events into Discord's analytics endpoint. Profile badges update in 1–2 days. Requires `cf_clearance` cookie from a browser logged into the same account.")
-
+    st.caption("Injects fake game-play events into Discord's analytics endpoint. Requires `cf_clearance` cookie.")
     col_a, col_b = st.columns(2)
     with col_a:
-        cookie_input = st.text_input(
-            "cf_clearance Cookie Value",
-            type="password",
-            value=st.session_state.cf_clearance_cookie,
-            key="cf_clearance_input",
-            help="Grab from browser devtools after visiting discord.com. Paste full 'cf_clearance=...' or just the value.",
-        )
+        cookie_input = st.text_input("cf_clearance Cookie Value", type="password", value=st.session_state.cf_clearance_cookie, key="cf_clearance_input")
         if cookie_input:
             st.session_state.cf_clearance_cookie = cookie_input.strip()
         fetch_token_btn = st.button("🔑 Fetch Analytics Token", use_container_width=True)
     with col_b:
-        st.markdown("**Token status:**")
         if st.session_state.analytics_token:
             st.success("Analytics token loaded.")
         else:
@@ -1228,7 +1203,6 @@ with tabs[25]:
         if st.button("🗑️ Clear Analytics Token", use_container_width=True):
             st.session_state.analytics_token = None
             st.success("Token cleared.")
-
     if fetch_token_btn:
         if not st.session_state.discord_token:
             st.error("Discord token required (sidebar).")
@@ -1240,18 +1214,12 @@ with tabs[25]:
                 st.success("Analytics token fetched.")
                 st.rerun()
             else:
-                st.error("Failed to fetch analytics token. Check token validity.")
-                log_to_console("❌ Analytics token fetch failed.")
-
+                st.error("Failed to fetch analytics token.")
     st.divider()
-    st.subheader("🎮 Fake Game Sessions")
-
-    game_rows = st.text_area(
-        "Game Sessions (one per line, format: `Game Name | hours`)",
-        value="Grand Theft Auto V | 12\nApex Legends | 8\nMinecraft | 24",
-        height=120,
-    )
-
+    fingerprint_input = st.text_input("Executable Fingerprint (optional)", value=st.session_state.spoofer_fingerprint, key="fingerprint_input")
+    if fingerprint_input:
+        st.session_state.spoofer_fingerprint = fingerprint_input.strip()
+    game_rows = st.text_area("Game Sessions (one per line, format: `Game Name | hours`)", value="Grand Theft Auto V | 12\nApex Legends | 8\nMinecraft | 24", height=120)
     col_send, col_stop = st.columns(2)
     with col_send:
         start_spoof = st.button("🚀 Fire Game Events", use_container_width=True)
@@ -1260,7 +1228,6 @@ with tabs[25]:
             st.session_state.spoofer_running = False
             log_to_console("💠 Spoofer session state reset.")
             st.success("Reset.")
-
     if start_spoof:
         if not st.session_state.discord_token:
             st.error("Discord token required.")
@@ -1277,13 +1244,10 @@ with tabs[25]:
                 parts = [p.strip() for p in line.split("|")]
                 if len(parts) < 2:
                     continue
-                name = parts[0]
                 try:
-                    hours = float(parts[1])
+                    parsed_sessions.append((parts[0], float(parts[1])))
                 except ValueError:
                     continue
-                parsed_sessions.append((name, hours))
-
             if not parsed_sessions:
                 st.error("No valid `Game Name | hours` entries parsed.")
             else:
@@ -1292,16 +1256,10 @@ with tabs[25]:
                 status_box = st.empty()
                 success_count = 0
                 fail_count = 0
-
                 for idx, (name, hours) in enumerate(parsed_sessions):
                     status_box.info(f"Injecting session: **{name}** ({hours}h)")
-                    events = build_game_events(name, hours)
-                    code, body = post_science_events(
-                        st.session_state.discord_token,
-                        st.session_state.analytics_token,
-                        st.session_state.cf_clearance_cookie,
-                        events,
-                    )
+                    events = build_game_events(name, hours, fingerprint=st.session_state.spoofer_fingerprint or None)
+                    code, body = post_science_events(st.session_state.discord_token, st.session_state.analytics_token, st.session_state.cf_clearance_cookie, events)
                     if code in (200, 204):
                         success_count += 1
                         log_to_console(f"💠 {name}: {code} accepted ({hours}h logged).")
@@ -1310,7 +1268,6 @@ with tabs[25]:
                         log_to_console(f"❌ {name}: {code} — {body[:120]}")
                     progress.progress((idx + 1) / len(parsed_sessions))
                     time.sleep(0.6)
-
                 st.session_state.spoofer_running = False
                 if fail_count == 0:
                     st.success(f"All {success_count} sessions accepted. Badges update in 1–2 days.")
@@ -1318,24 +1275,10 @@ with tabs[25]:
                     st.warning(f"{success_count} accepted, {fail_count} failed. Check console for codes.")
                 status_box.empty()
 
-    st.divider()
-    with st.expander("ℹ️ How this works / requirements"):
-        st.markdown(
-            """
-- Discord tracks playtime via `launch_game` and `running_game_heartbeat` analytics events.
-- This tab sends the same events the desktop client would, with custom hours and game names.
-- **Required:** account token, `cf_clearance` cookie (Cloudflare clearance), and a fresh analytics token.
-- The cookie expires periodically — if you get `403`, re-capture it from your browser.
-- **Do not spam.** One pass per game is enough. Multiple rapid passes can trigger rate limits.
-- Badges appear under `Profile → Games` in 1–2 days.
-            """
-        )
 
-# ================= TAB 27: FRIEND INVITES (NEW) =================
 with tabs[26]:
     st.header("🤝 Friend Invite Generator")
-    st.caption("Generates `discord.gg/...` links that add the clicker as a friend when used. No mutual server required.")
-
+    st.caption("Generates `discord.gg/...` links that add the clicker as a friend when used.")
     count_input = st.number_input("How many invites to generate?", min_value=1, max_value=20, value=1)
     if st.button("✨ Generate Friend Invites", use_container_width=True):
         if not st.session_state.discord_token:
@@ -1345,12 +1288,7 @@ with tabs[26]:
             generated = []
             for i in range(int(count_input)):
                 try:
-                    r = requests.post(
-                        "https://discord.com/api/v9/users/@me/invites",
-                        headers=h,
-                        json={},
-                        timeout=8,
-                    )
+                    r = requests.post("https://discord.com/api/v9/users/@me/invites", headers=h, json={}, timeout=8)
                     if r.status_code in (200, 201):
                         code = r.json().get("code") or r.json().get("invite", {}).get("code")
                         if code:
@@ -1365,31 +1303,441 @@ with tabs[26]:
                     log_to_console(f"❌ Friend invite exception: {e}")
                     st.error(f"Request {i+1} errored: {e}")
                     break
-
             if generated:
                 st.session_state.friend_invites = generated
                 st.success(f"Generated {len(generated)} invite(s).")
                 for code in generated:
                     st.code(f"https://discord.gg/{code}", language="text")
-
     if st.session_state.friend_invites:
         st.divider()
         st.subheader("📋 Previously Generated (this session)")
         for code in st.session_state.friend_invites:
             st.code(f"https://discord.gg/{code}", language="text")
 
-    with st.expander("ℹ️ How this works"):
-        st.markdown(
-            """
-- `POST /users/@me/invites` returns a one-use friend link.
-- Anyone who clicks it while logged in is added as a friend to your account.
-- No mutual server is required — that's why this is useful.
-- Rate-limited. Don't spam. Discord silently drops after a few in quick succession.
-- Links are single-use by default. Generate a new one per person.
-            """
-        )
 
-# --- Real-time console ---
+with tabs[27]:
+    st.header("🔑 Batch Discord Token Checker")
+    token_list_input = st.text_area("Tokens (one per line)", height=200, placeholder="MTA...\nMTI...\n...")
+    if st.button("🔍 Validate All Tokens", use_container_width=True):
+        if not token_list_input.strip():
+            st.error("Paste at least one token.")
+        else:
+            tokens = [t.strip() for t in token_list_input.split("\n") if t.strip()]
+            results = []
+            progress = st.progress(0.0)
+            for idx, tok in enumerate(tokens):
+                try:
+                    r = requests.get("https://discord.com/api/v9/users/@me", headers=get_headers(tok), timeout=6)
+                    if r.status_code == 200:
+                        data = r.json()
+                        snowflake = int(data.get("id", "0"))
+                        created = datetime.fromtimestamp(((snowflake >> 22) + 1420070400000) / 1000.0)
+                        results.append({"Token": tok[:20] + "..." + tok[-6:] if len(tok) > 28 else tok, "Status": "✅ Valid", "Username": f"{data.get('username', '?')}#{data.get('discriminator', '0')}", "ID": data.get("id", "?"), "Flags": data.get("public_flags", 0), "Created": created.strftime("%Y-%m-%d")})
+                    elif r.status_code == 401:
+                        results.append({"Token": tok[:20] + "..." if len(tok) > 20 else tok, "Status": "❌ Invalid", "Username": "-", "ID": "-", "Flags": "-", "Created": "-"})
+                    elif r.status_code == 403:
+                        results.append({"Token": tok[:20] + "..." if len(tok) > 20 else tok, "Status": "🔒 Locked", "Username": "-", "ID": "-", "Flags": "-", "Created": "-"})
+                    else:
+                        results.append({"Token": tok[:20] + "..." if len(tok) > 20 else tok, "Status": f"⚠️ {r.status_code}", "Username": "-", "ID": "-", "Flags": "-", "Created": "-"})
+                except Exception as e:
+                    results.append({"Token": tok[:20] + "..." if len(tok) > 20 else tok, "Status": "⚠️ Error", "Username": str(e)[:30], "ID": "-", "Flags": "-", "Created": "-"})
+                progress.progress((idx + 1) / len(tokens))
+                time.sleep(0.4)
+            st.session_state.token_check_results = results
+            log_to_console(f"🔑 Validated {len(results)} tokens.")
+    if st.session_state.token_check_results:
+        st.divider()
+        st.dataframe(pd.DataFrame(st.session_state.token_check_results), use_container_width=True)
+        valid_count = sum(1 for r in st.session_state.token_check_results if "Valid" in r["Status"])
+        st.info(f"**{valid_count} / {len(st.session_state.token_check_results)}** tokens valid.")
+
+
+with tabs[28]:
+    st.header("📡 Auth-Free Guild Scraper")
+    invite_input = st.text_input("Invite Code or URL", placeholder="discord.gg/abc123 or abc123")
+    if st.button("🔍 Resolve Server", use_container_width=True):
+        if not invite_input.strip():
+            st.error("Enter an invite code.")
+        else:
+            code = invite_input.strip()
+            if "discord.gg/" in code:
+                code = code.split("discord.gg/")[-1].split("/")[0].split("?")[0]
+            elif "discord.com/invite/" in code:
+                code = code.split("discord.com/invite/")[-1].split("/")[0].split("?")[0]
+            try:
+                r = requests.get(f"https://discord.com/api/v9/invites/{code}?with_counts=true&with_expiration=true", headers={"User-Agent": "Mozilla/5.0"}, timeout=8)
+                if r.status_code == 200:
+                    data = r.json()
+                    guild = data.get("guild", {})
+                    channel = data.get("channel", {})
+                    st.session_state.guild_scrape_result = data
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.metric("Server Name", guild.get("name", "?"))
+                        st.metric("Members", f"{guild.get('member_count', '?')}")
+                        st.metric("Online", f"{guild.get('presence_count', '?')}")
+                        st.metric("ID", guild.get("id", "?"))
+                    with col2:
+                        st.metric("Verification Level", guild.get("verification_level", "?"))
+                        st.metric("Premium Tier", guild.get("premium_tier", "?"))
+                        st.metric("Boosts", guild.get("premium_subscription_count", "?"))
+                        st.metric("Channel", f"#{channel.get('name', '?')}")
+                    if guild.get("icon"):
+                        st.image(f"https://cdn.discordapp.com/icons/{guild['id']}/{guild['icon']}.png?size=128", width=128)
+                    if guild.get("banner"):
+                        st.image(f"https://cdn.discordapp.com/banners/{guild['id']}/{guild['banner']}.png?size=512")
+                    st.json(data)
+                    log_to_console(f"📡 Resolved invite {code} → {guild.get('name', '?')} ({guild.get('member_count', '?')} members).")
+                else:
+                    st.error(f"Failed: HTTP {r.status_code} — {r.text[:150]}")
+            except Exception as e:
+                st.error(f"Error: {e}")
+
+
+with tabs[29]:
+    st.header("🧪 Nitro Plugin Payload Generator")
+    plugin_choice = st.selectbox("Plugin", ["Vencord FakeNitro", "BetterDiscord YABDP4Nitro"])
+    if plugin_choice == "Vencord FakeNitro":
+        st.subheader("Vencord FakeNitro Settings")
+        emoji_hyperlink = st.toggle("Emoji Hyperlink Bypass", value=True)
+        emoji_hyperlink_text = st.text_input("Hyperlink Text Template", value="{{NAME}}")
+        sticker_bypass = st.toggle("Sticker Bypass", value=True)
+        stream_quality = st.toggle("Stream Quality Bypass", value=True)
+        st.code(json.dumps({"enabled": True, "enableEmojiBypass": emoji_hyperlink, "emojiBypassLinkText": emoji_hyperlink_text, "enableStickerBypass": sticker_bypass, "enableStreamQualityBypass": stream_quality}, indent=4), language="json")
+    else:
+        st.subheader("YABDP4Nitro Settings")
+        streaming = st.toggle("Streaming Quality Bypass", value=True)
+        emotes = st.toggle("Cross-Server Emotes", value=True)
+        profile_effects = st.toggle("Fake Profile Effects", value=True)
+        banners = st.toggle("Fake Profile Banners", value=True)
+        decorations = st.toggle("Fake Avatar Decorations", value=True)
+        clips = st.toggle("Clips 100MB Limit Bypass", value=True)
+        st.code(json.dumps({"streaming": {"enabled": streaming}, "emotes": {"enabled": emotes}, "profile": {"effects": profile_effects, "banners": banners, "decorations": decorations}, "clips": {"enabled": clips}}, indent=4), language="json")
+    st.divider()
+    st.markdown("**Installation links:**")
+    st.markdown("- [Vencord](https://vencord.dev/download)")
+    st.markdown("- [YABDP4Nitro](https://github.com/riolubruh/YABDP4Nitro)")
+
+
+with tabs[30]:
+    st.header("🛠️ Steam AppManifest Generator")
+    col1, col2 = st.columns(2)
+    with col1:
+        app_id_input = st.text_input("Steam App ID", value="271590")
+        game_name_input = st.text_input("Game Name", value="Grand Theft Auto V")
+    with col2:
+        install_dir_input = st.text_input("Install Dir (folder name)", value="Grand Theft Auto V")
+        steam_id_input = st.text_input("Steam ID (optional)", value="0")
+    if st.button("📄 Generate .acf", use_container_width=True):
+        if not app_id_input or not game_name_input or not install_dir_input:
+            st.error("Fill in App ID, Game Name, and Install Dir.")
+        else:
+            st.session_state.steam_acf_output = generate_steam_appmanifest(app_id_input.strip(), game_name_input.strip(), install_dir_input.strip(), steam_id_input.strip() or "0")
+            log_to_console(f"🛠️ Generated appmanifest_{app_id_input}.acf for {game_name_input}.")
+    if st.session_state.steam_acf_output:
+        st.divider()
+        st.code(st.session_state.steam_acf_output, language="text")
+        st.download_button("📥 Download .acf", data=st.session_state.steam_acf_output, file_name=f"appmanifest_{app_id_input}.acf", mime="text/plain")
+
+
+with tabs[31]:
+    st.header("🎯 Discord Quest Completer — Guide")
+    st.warning("⚠️ **Enforcement active.** Use on accounts you can lose.")
+    with st.expander("📥 Download & Installation", expanded=True):
+        st.markdown("**Repo:** [github.com/nyxxbit/discord-quest-completer](https://github.com/nyxxbit/discord-quest-completer)\n\nSupports all five quest types including `ACHIEVEMENT_IN_ACTIVITY`.")
+
+
+with tabs[32]:
+    st.header("💻 macOS Remote Debugging Port — Research")
+    st.error("⚠️ Local attack vector. Requires local access.")
+    with st.expander("🔍 Vulnerability Summary", expanded=True):
+        st.markdown("**Target:** Discord macOS Stable 0.0.373\n\n**Repo:** [github.com/NiceTop1027/CVE-2026-Discord](https://github.com/NiceTop1027/CVE-2026-Discord)")
+
+
+with tabs[33]:
+    st.header("📨 Mass DM Tool — Guide")
+    st.warning("⚠️ **High ban risk.** Use on burners only.")
+    with st.expander("🛠️ Implementation Pattern"):
+        st.code('''def mass_dm(token, user_ids, message, delay=4.0):
+    headers = get_headers(token)
+    for uid in user_ids:
+        r = requests.post("https://discord.com/api/v9/users/@me/channels", headers=headers, json={"recipient_id": uid}, timeout=8)
+        if r.status_code != 200:
+            continue
+        requests.post(f"https://discord.com/api/v9/channels/{r.json()['id']}/messages", headers=headers, json={"content": message}, timeout=8)
+        time.sleep(delay)''', language="python")
+
+
+with tabs[34]:
+    st.header("🏃 Vanity URL Sniper")
+    col1, col2 = st.columns(2)
+    with col1:
+        vanity_target = st.text_input("Target Vanity Code", key="vanity_target_input", placeholder="mydreamserver")
+        guild_id_input = st.text_input("Your Server (Guild) ID", key="vanity_guild_id")
+    with col2:
+        snipe_tokens = st.text_area("Tokens (one per line)", height=100, key="vanity_tokens")
+        snipe_delay = st.slider("Check interval (seconds)", 0.1, 5.0, 0.5)
+    col_start, col_stop = st.columns(2)
+    with col_start:
+        start_vanity = st.button("🚀 Start Vanity Sniper", use_container_width=True)
+    with col_stop:
+        stop_vanity = st.button("🛑 Stop Vanity Sniper", use_container_width=True)
+    if start_vanity:
+        if not vanity_target or not guild_id_input or not snipe_tokens.strip():
+            st.error("Target, guild ID, and at least one token required.")
+        else:
+            st.session_state.vanity_sniper_running = True
+            token_list = [t.strip() for t in snipe_tokens.split("\n") if t.strip()]
+            log_to_console(f"🏃 Vanity sniper armed: '{vanity_target}' — {len(token_list)} token(s).")
+            check_count = 0
+            while st.session_state.vanity_sniper_running and check_count < 100:
+                check_count += 1
+                for tok in token_list:
+                    try:
+                        check_r = requests.get(f"https://discord.com/api/v9/invites/{vanity_target}", headers=get_headers(tok), timeout=5)
+                        if check_r.status_code == 404:
+                            claim_r = requests.patch(f"https://discord.com/api/v9/guilds/{guild_id_input}/vanity-url", headers=get_headers(tok), json={"code": vanity_target}, timeout=8)
+                            if claim_r.status_code == 200:
+                                st.success(f"🎉 CLAIMED: discord.gg/{vanity_target}")
+                                log_to_console(f"🏃 VANITY CLAIMED: discord.gg/{vanity_target}")
+                                st.session_state.vanity_sniper_running = False
+                                break
+                    except:
+                        pass
+                if st.session_state.vanity_sniper_running:
+                    time.sleep(snipe_delay)
+                    log_to_console(f"🏃 Check #{check_count} — not available yet.")
+                    st.rerun()
+    if stop_vanity:
+        st.session_state.vanity_sniper_running = False
+        log_to_console("🏃 Vanity sniper stopped.")
+        st.rerun()
+
+
+with tabs[35]:
+    st.header("💎 Nitro Sniper")
+    nitro_tokens = st.text_area("Tokens (one per line)", height=150, key="nitro_tokens")
+    auto_claim = st.toggle("Auto-Claim Gifts", value=True)
+    if st.button("🚀 Start Nitro Sniper", use_container_width=True):
+        if not nitro_tokens.strip():
+            st.error("Paste at least one token.")
+        else:
+            st.session_state.nitro_sniper_running = True
+            token_list = [t.strip() for t in nitro_tokens.split("\n") if t.strip()]
+            log_to_console(f"💎 Nitro sniper armed — {len(token_list)} token(s).")
+            scan_count = 0
+            while st.session_state.nitro_sniper_running and scan_count < 20:
+                scan_count += 1
+                for tok in token_list:
+                    try:
+                        guilds_r = requests.get("https://discord.com/api/v9/users/@me/guilds", headers=get_headers(tok), timeout=6)
+                        if guilds_r.status_code == 200:
+                            for g in guilds_r.json()[:5]:
+                                ch_r = requests.get(f"https://discord.com/api/v9/guilds/{g['id']}/channels", headers=get_headers(tok), timeout=6)
+                                if ch_r.status_code == 200:
+                                    for ch in ch_r.json()[:3]:
+                                        if ch.get("type") == 0:
+                                            msg_r = requests.get(f"https://discord.com/api/v9/channels/{ch['id']}/messages?limit=5", headers=get_headers(tok), timeout=6)
+                                            if msg_r.status_code == 200:
+                                                for m in msg_r.json():
+                                                    content = m.get("content", "")
+                                                    if "discord.gift/" in content or "discord.com/gifts/" in content:
+                                                        gm = re.search(r'(?:discord\\.gift/|discord\\.com/gifts/)([a-zA-Z0-9]+)', content)
+                                                        if gm and auto_claim:
+                                                            cr = requests.post(f"https://discord.com/api/v9/entitlements/gift-codes/{gm.group(1)}/redeem", headers=get_headers(tok), json={"channel_id": ch["id"]}, timeout=8)
+                                                            if cr.status_code == 200:
+                                                                st.success(f"🎉 NITRO: {gm.group(1)}")
+                                    time.sleep(0.3)
+                    except:
+                        pass
+                time.sleep(2)
+                log_to_console(f"💎 Scan #{scan_count} complete.")
+                st.rerun()
+    if st.button("🛑 Stop Nitro Sniper", use_container_width=True):
+        st.session_state.nitro_sniper_running = False
+        st.rerun()
+
+
+with tabs[36]:
+    st.header("📝 Message Logger")
+    logger_ch = st.text_input("Channel ID to Log", value=st.session_state.channel_id, key="logger_ch")
+    log_limit = st.number_input("Fetch count", min_value=10, max_value=200, value=50)
+    if st.button("🔍 Fetch & Log Messages", use_container_width=True):
+        if not st.session_state.discord_token or not logger_ch:
+            st.error("Token and channel ID required.")
+        else:
+            h = get_headers(st.session_state.discord_token)
+            r = requests.get(f"https://discord.com/api/v9/channels/{logger_ch}/messages?limit={log_limit}", headers=h, timeout=8)
+            if r.status_code == 200:
+                log_entries = [{"ID": m["id"], "Author": m["author"]["username"], "Author ID": m["author"]["id"], "Content": m.get("content", "")[:200], "Timestamp": m.get("timestamp", ""), "Edited": m.get("edited_timestamp", "—"), "Attachments": len(m.get("attachments", []))} for m in r.json()]
+                st.session_state.logged_messages = log_entries
+                st.success(f"Logged {len(log_entries)} messages.")
+    if st.session_state.logged_messages:
+        df = pd.DataFrame(st.session_state.logged_messages)
+        st.dataframe(df, use_container_width=True)
+        st.download_button("📥 Export Log (CSV)", data=df.to_csv(index=False), file_name=f"message_log_{logger_ch}.csv", mime="text/csv")
+
+
+with tabs[37]:
+    st.header("📦 Guild Backup & Restore")
+    col1, col2 = st.columns(2)
+    with col1:
+        backup_guild_id = st.text_input("Server ID to Backup", key="backup_guild")
+        if st.button("📤 Export Full Backup", use_container_width=True):
+            if not st.session_state.discord_token or not backup_guild_id:
+                st.error("Token and guild ID required.")
+            else:
+                h = get_headers(st.session_state.discord_token)
+                with st.spinner("Exporting..."):
+                    guild = requests.get(f"https://discord.com/api/v9/guilds/{backup_guild_id}", headers=h, timeout=10).json()
+                    channels = requests.get(f"https://discord.com/api/v9/guilds/{backup_guild_id}/channels", headers=h, timeout=10).json()
+                    roles = requests.get(f"https://discord.com/api/v9/guilds/{backup_guild_id}/roles", headers=h, timeout=10).json()
+                    emojis = requests.get(f"https://discord.com/api/v9/guilds/{backup_guild_id}/emojis", headers=h, timeout=10).json()
+                    invites = requests.get(f"https://discord.com/api/v9/guilds/{backup_guild_id}/invites", headers=h, timeout=10).json()
+                    st.session_state.backup_data = {"guild": guild, "roles": roles, "channels": channels, "emojis": emojis, "invites": invites, "backup_timestamp": datetime.now().isoformat()}
+                    st.success(f"Backup complete — {len(channels)} channels, {len(roles)} roles.")
+        if st.session_state.backup_data:
+            st.download_button("📥 Download Backup JSON", data=json.dumps(st.session_state.backup_data, indent=2), file_name=f"guild_backup_{backup_guild_id}.json", mime="application/json")
+    with col2:
+        st.subheader("Restore")
+        restore_file = st.file_uploader("Upload Backup JSON", type=["json"], key="restore_file")
+        restore_guild_id = st.text_input("Target Server ID", key="restore_guild")
+        if st.button("📥 Restore Backup", use_container_width=True):
+            if not restore_file or not restore_guild_id or not st.session_state.discord_token:
+                st.error("All fields required.")
+            else:
+                try:
+                    backup = json.loads(restore_file.read())
+                    h = get_headers(st.session_state.discord_token)
+                    with st.spinner("Restoring..."):
+                        for role in backup.get("roles", []):
+                            if role.get("name") == "@everyone":
+                                continue
+                            requests.post(f"https://discord.com/api/v9/guilds/{restore_guild_id}/roles", headers=h, json={"name": role["name"], "permissions": role.get("permissions", "0"), "color": role.get("color", 0), "hoist": role.get("hoist", False), "mentionable": role.get("mentionable", False)}, timeout=10)
+                            time.sleep(0.5)
+                        for ch in backup.get("channels", []):
+                            requests.post(f"https://discord.com/api/v9/guilds/{restore_guild_id}/channels", headers=h, json={"name": ch["name"], "type": ch["type"], "position": ch.get("position", 0), "topic": ch.get("topic"), "nsfw": ch.get("nsfw", False)}, timeout=10)
+                            time.sleep(0.5)
+                        st.success("Restore complete.")
+                except Exception as e:
+                    st.error(f"Restore failed: {e}")
+
+
+with tabs[38]:
+    st.header("🔗 Token Joiner (Mass Join)")
+    join_invite = st.text_input("Invite Code or URL", key="join_invite", placeholder="discord.gg/abc123")
+    join_tokens = st.text_area("Tokens (one per line)", height=150, key="join_tokens")
+    join_delay = st.slider("Delay between joins (seconds)", 0.5, 10.0, 2.0, key="join_delay")
+    if st.button("🚀 Join All Tokens", use_container_width=True):
+        if not join_invite.strip() or not join_tokens.strip():
+            st.error("Invite and tokens required.")
+        else:
+            code = join_invite.strip()
+            if "discord.gg/" in code:
+                code = code.split("discord.gg/")[-1].split("/")[0].split("?")[0]
+            elif "discord.com/invite/" in code:
+                code = code.split("discord.com/invite/")[-1].split("/")[0].split("?")[0]
+            token_list = [t.strip() for t in join_tokens.split("\n") if t.strip()]
+            results = []
+            progress = st.progress(0.0)
+            for idx, tok in enumerate(token_list):
+                try:
+                    r = requests.post(f"https://discord.com/api/v9/invites/{code}", headers=get_headers(tok), json={}, timeout=8)
+                    if r.status_code == 200:
+                        results.append({"Token": tok[:20] + "...", "Status": "✅ Joined"})
+                    elif r.status_code == 429:
+                        ra = r.json().get("retry_after", 5)
+                        results.append({"Token": tok[:20] + "...", "Status": f"⏳ Rate limited ({ra}s)"})
+                        time.sleep(ra)
+                    else:
+                        results.append({"Token": tok[:20] + "...", "Status": f"❌ {r.status_code}"})
+                except Exception as e:
+                    results.append({"Token": tok[:20] + "...", "Status": f"⚠️ {str(e)[:30]}"})
+                progress.progress((idx + 1) / len(token_list))
+                time.sleep(join_delay)
+            st.session_state.join_results = results
+            st.success(f"{sum(1 for r in results if 'Joined' in r['Status'])}/{len(results)} tokens joined.")
+    if st.session_state.join_results:
+        st.dataframe(pd.DataFrame(st.session_state.join_results), use_container_width=True)
+
+
+with tabs[39]:
+    st.header("🧅 Tor Token Manager — Guide")
+    with st.expander("📥 Setup Guide", expanded=True):
+        st.markdown("**Repo:** [github.com/Kurama250/Discord_token_manager](https://github.com/Kurama250/Discord_token_manager)\n\nInstall Tor, launch Token Manager, toggle 'Use Tor' per account. Routes via `127.0.0.1:9050`.")
+
+
+with tabs[40]:
+    st.header("📱 QR Login Hijack Kit — Guide")
+    st.error("⚠️ Social engineering attack. Red team research only.")
+    with st.expander("🛠️ Attack Flow"):
+        st.markdown("**PoC:** [github.com/9P9/Discord-QR-Token-Logger](https://github.com/9P9/Discord-QR-Token-Logger)\n\nNever scan Discord QR codes from untrusted sources.")
+
+
+with tabs[41]:
+    st.header("🤖 Android Account Generator — Guide")
+    st.error("⚠️ Violates Discord ToS. Research only.")
+    with st.expander("🔬 Technical Overview"):
+        st.markdown("**Repo:** [github.com/SerialHooker/Fitna-Token-Gen](https://github.com/SerialHooker/Fitna-Token-Gen)\n\nJava 17+, Android emulator, proxy required.")
+
+
+with tabs[42]:
+    st.header("🎤 Real-Time RVC Voice Changer — Guide")
+    with st.expander("📥 Setup", expanded=True):
+        st.markdown("**Tool:** [meloie](https://github.com/sstina/meloie)\n\n**Pipeline:** Mic → RVC → VB-CABLE → Discord")
+
+
+with tabs[43]:
+    st.header("☢️ Server Termination 0-Day — Research Only")
+    st.error("🚫 **DO NOT USE.** Documentation only.")
+    with st.expander("🔍 Threat Summary"):
+        st.markdown("100+ servers terminated, one 230k-member partnered server. Unpatched April 2026.")
+
+
+with tabs[44]:
+    st.header("🕵️ Token Grabber — Research Guide")
+    st.error("⚠️ Malware. Research surface only.")
+    with st.expander("🔬 Technical Breakdown"):
+        st.markdown("**Repo:** [github.com/itzzkirito/Token-Grabber](https://github.com/itzzkirito/Token-Grabber)")
+
+
+with tabs[45]:
+    st.header("💰 Client Manager & Monetization")
+    clients = st.session_state.clients
+    with st.form("add_client"):
+        col1, col2 = st.columns(2)
+        with col1:
+            client_name = st.text_input("Client Name")
+            client_discord = st.text_input("Discord Tag")
+        with col2:
+            client_plan = st.selectbox("Plan", ["Basic — $10/mo", "Pro — $25/mo", "Enterprise — $50/mo"])
+            client_notes = st.text_input("Notes")
+        submitted = st.form_submit_button("Add Client")
+        if submitted and client_name:
+            api_key = f"dsc_{random.randint(10000000, 99999999)}_{random.randint(1000, 9999)}"
+            clients[api_key] = {"name": client_name, "discord": client_discord, "plan": client_plan, "notes": client_notes, "created": datetime.now().isoformat(), "active": True}
+            save_clients(clients)
+            st.success(f"Client added — API Key: `{api_key}`")
+            st.rerun()
+    if clients:
+        st.divider()
+        df_data = [{"API Key": k[:12] + "...", "Name": c["name"], "Discord": c["discord"], "Plan": c["plan"], "Active": "✅" if c.get("active") else "❌", "Created": c["created"][:10]} for k, c in clients.items()]
+        st.dataframe(pd.DataFrame(df_data), use_container_width=True)
+        total_mrr = sum({"Basic — $10/mo": 10, "Pro — $25/mo": 25, "Enterprise — $50/mo": 50}.get(c["plan"], 0) for c in clients.values() if c.get("active"))
+        st.metric("Monthly Recurring Revenue", f"${total_mrr}")
+        st.metric("Active Clients", sum(1 for c in clients.values() if c.get("active")))
+
+
+with tabs[46]:
+    st.header("🚀 Deployment & Client Acquisition Guide")
+    with st.expander("☁️ Hosting Options", expanded=True):
+        st.markdown("| Platform | Cost | Pros |\n|---|---|---|\n| Streamlit Cloud | Free | Instant deploy |\n| Railway | $5/mo | Persistent |\n| Render | Free tier | GitHub integration |\n| Hetzner VPS | €4/mo | Full control |")
+    with st.expander("🎯 Client Acquisition Channels"):
+        st.markdown("- Discord server owner communities\n- r/discordapp, r/Discord_Bots\n- Twitter/X server backup testimonials\n- YouTube tutorials\n- Fiverr / Upwork gigs")
+    with st.expander("📈 SaaS Pricing Tiers"):
+        st.markdown("| Tier | Price | Features |\n|---|---|---|\n| Free | $0 | 1-token checker, guild scraper |\n| Basic | $10/mo | 10 tokens, vanity sniper |\n| Pro | $25/mo | 50 tokens, all snipers |\n| Enterprise | $50/mo | Unlimited, API |\n| Agency | $200/mo | White-label |")
+
+
 st.divider()
 st.subheader("📟 Live Operational Control Terminal Console")
 console_container = st.empty()
